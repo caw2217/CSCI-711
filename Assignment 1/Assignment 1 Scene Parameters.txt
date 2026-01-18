@@ -11,17 +11,23 @@ Z:2m
 Radius: 1.0m
 
 Floor:
-X:0
-Y:36m
-Z:0m
-Radius: 1.0m
+X:0.0m
+Y:36.0m
+Z:0.0m
+Size X: 7.0m
+Size Y: 40.0m
+SIze Z: 1.0m
+
+Light Source:
+X: -2.5m
+Y: -25.0m
+Z: 26.0m
 
 Camera:
-X:
-Y:
-Z:
-Lookat:
-X:
-Y:
-Z:
+X:-3.5m
+Y:-10.0m
+Z:2.0m
+Rotation X: 90°
+Rotation Y: 0°
+Rotation Z: 0°
 
