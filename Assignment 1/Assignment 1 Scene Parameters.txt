@@ -1,0 +1,27 @@
+Metallic Sphere:
+X:-1.7m
+Y: 4.8m
+Z: 1.5m
+Radius: 1.0m
+
+Clear Sphere:
+X:-3.6m
+Y:-2m
+Z:2m
+Radius: 1.0m
+
+Floor:
+X:0
+Y:36m
+Z:0m
+Radius: 1.0m
+
+Camera:
+X:
+Y:
+Z:
+Lookat:
+X:
+Y:
+Z:
+
