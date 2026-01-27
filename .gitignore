@@ -50,3 +50,5 @@ BTX_Solutions.sln
 .vs/
 
 /include/glm/out/build/x64-Debug
+/Raytracer/Raytracer/x64/Debug
+/Raytracer/x64/Debug
