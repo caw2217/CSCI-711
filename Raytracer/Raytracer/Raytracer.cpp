@@ -2,10 +2,15 @@
 //
 
 #include <iostream>
+#include <glm\glm.hpp>
+#include <opencv-4.12.0\include\opencv2\opencv.hpp>
+
+typedef glm::vec2 vector2;
 
 int main()
 {
-    std::cout << "Hello World!\n";
+    vector2 v2(1.3f, 2.0f);
+    std::cout << v2.x << ", " << v2.y;
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
