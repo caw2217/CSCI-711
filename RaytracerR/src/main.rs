@@ -4,21 +4,27 @@ extern crate nalgebra as na;
 
 use std::collections::hash_set::Intersection;
 use image::{ImageBuffer, RgbImage, Rgb};
-use na::{Transform3, Point3, Vector3};
+use na::{Transform3, Point3, UnitVector3, Vector3};
 
 pub struct Ray {
     pub origin: Point3<f32>,
-    pub direction: Vector3<f32>
+    pub direction: UnitVector3<f32>
+}
+
+impl Ray {
+    pub fn new(origin: Point3<f32>, direction: Vector3<f32>) -> Ray {
+        return Ray { origin, direction: UnitVector3::new_normalize(direction) };
+    }
 }
 
 pub struct Camera {
     position: Point3<f32>,
-    lookat: Vector3<f32>,
-    up: Vector3<f32>
+    lookat: UnitVector3<f32>,
+    up: UnitVector3<f32>
 }
 
 pub struct Object {
-    color: Vector3<f32>,
+    color: UnitVector3<f32>,
     position: Point3<f32>,
 }
 
@@ -39,7 +45,7 @@ impl Intersects for Sphere {
 
 pub struct Triangle {
     pub vertices: Vec<Point3<f32>>,
-    pub normal: Vector3<f32>,
+    pub normal: UnitVector3<f32>,
 }
 
 impl Intersects for Triangle {
