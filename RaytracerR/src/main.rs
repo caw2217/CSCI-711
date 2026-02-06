@@ -13,8 +13,15 @@ pub struct Ray {
 }
 
 pub struct HitRecord {
-    pub point: Point3<f32>,
+    pub object_pos: Point3<f32>,
+    pub omega: f32,
     pub normal: UnitVector3<f32>,
+}
+
+impl HitRecord {
+    pub fn new(object_pos: Point3<f32>, omega: f32, normal: UnitVector3<f32>) -> Self {
+        return HitRecord{object_pos, omega, normal};
+    }
 }
 
 #[derive(Debug)]
@@ -55,6 +62,23 @@ pub struct Object {
 impl Object {
     pub fn new(color: Vector3<f32>, shape: Shape, transform: Similarity3<f32>) -> Object {
         return Object {color, shape, transform };
+    }
+
+    pub fn create_sphere(center: Point3<f32>, radius: f32, color: Vector3<f32>) -> Object {
+        return Object {
+            color,
+            shape: Shape::Sphere(Sphere::new(center, radius)),
+            transform: Default::default(),
+        };
+    }
+
+    //Creates a triangle (Clockwise)
+    pub fn create_triangle(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, color: Vector3<f32>) -> Object {
+        return Object {
+            color,
+            shape: Shape::Triangle(Triangle::new(p1, p2, p3)),
+            transform: Default::default(),
+        };
     }
 
     ///Convert object into camera coords
@@ -107,21 +131,22 @@ impl Sphere {
 
 impl Intersects for Sphere {
     fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
-        return Option::None;
+        let b = 2.0 * (ray.direction.dot( &(ray.origin - self.center)));
+        let c = (ray.origin - self.center).magnitude_squared() - self.radius * self.radius;
+
+        let determinant = b * b - 4.0 * c;
+        if (determinant < 0.0) {
+            return Option::None;
+        } else if determinant == 0.0 {
+            let omega = (-b)/(2.0);
+            let point = ray.origin + ray.direction.scale(omega);
+            let normal = UnitVector3::new_normalize(point - self.center);
+            return Option::Some(HitRecord::new(self.center, omega, normal));
+        } else {
+            
+        }
+
     }
-
-    // fn transform(&mut self, transform: &Similarity3<f32>) {
-    //     self.center = transform.isometry.transform_point(&self.center);
-    //
-    //     self.radius = self.radius * transform.scaling();
-    // }
-
-    //fn apply_mvp(&mut self, model_matrix: Matrix4<f32>, view_matrix: Matrix4<f32>, projection_matrix: Matrix4<f32>) {
-    //    let mvp = projection_matrix * view_matrix * model_matrix;
-
-    //    self.center = mvp.transform_point(&self.center);
-
-    //}
 }
 
 #[derive(Debug)]
@@ -130,16 +155,21 @@ pub struct Triangle {
     normal: UnitVector3<f32>,
 }
 
+impl Triangle {
+    pub fn new(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>) -> Self {
+        //counterclockwise
+        let n = (p2 - p1).cross(&(p3-p1));
+        return Triangle {
+            vertices: vec![p1, p2, p3],
+            normal: UnitVector3::new_normalize(n),
+        };
+    }
+}
+
 impl Intersects for Triangle {
     fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
         return Option::None;
     }
-
-    // fn transform(&mut self, transform: &Similarity3<f32>) {
-    //     for vertex in self.vertices.iter_mut() {
-    //         *vertex = transform.transform_point(vertex);
-    //     }
-    // }
 }
 
 struct World {
@@ -164,6 +194,8 @@ impl World {
     }
 }
 
+//Objects/Camera must be transformed before adding to the world
+//The world will convert all its objects to camera space
 fn main() {
     let camera = Camera::new(
         Point3::new(0.0, 0.0, -10.0),
