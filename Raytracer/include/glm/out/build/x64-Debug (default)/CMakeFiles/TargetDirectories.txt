@@ -1,3 +1,0 @@
-C:/Repositories/BTX/include/glm/out/build/x64-Debug (default)/CMakeFiles/glm_dummy.dir
-C:/Repositories/BTX/include/glm/out/build/x64-Debug (default)/CMakeFiles/edit_cache.dir
-C:/Repositories/BTX/include/glm/out/build/x64-Debug (default)/CMakeFiles/rebuild_cache.dir
