@@ -455,12 +455,14 @@ fn main() {
     let mut c: Camera = Camera::new(Point3::new(-4.5, 1.6, -10.0), Vector3::z_axis(), Vector3::y_axis(), 5.0, 45.0, 480, 640);
     //c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
     //c.set_pos(-3.5, 10.0, -10.0);
-    let light1: Light = Light::new(Point3::new(-5.1, 50.0, -40.0), Vector3::new(5.0, 5.0, 5.0));
-    //let light2: Light = Light::new(Point3::new(4.5, 3.0, -10.0), Vector3::new(10.0, 10.0, 10.0));
+    let light1: Light = Light::new(Point3::new(-10.0, 40.0, -40.0), Vector3::new(5.0, 0.0, 0.0));
+    let light2: Light = Light::new(Point3::new(10.0, 40.0, -40.0), Vector3::new(0.0, 0.0, 5.0));
+    let light3: Light = Light::new(Point3::new(-10.0, 30.0, -60.0), Vector3::new(0.0, 5.0, 0.0));
     let mut w: World = World::new(colors::SKY_BLUE);
 
     w.add_light(light1);
-    //w.add_light(light2);
+    w.add_light(light2);
+    w.add_light(light3);
 
     let mat1 = Phong::new(colors::RED, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     let mat2 = Phong::new(colors::GREEN, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
@@ -490,5 +492,5 @@ fn main() {
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
-    c.snapshot(&mut w, "assign3render.png");
+    c.snapshot(&mut w, "assign3render-3lights.png");
 }
