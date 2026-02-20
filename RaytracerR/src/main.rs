@@ -1,11 +1,19 @@
 #![allow(warnings)]
+
+mod lighting;
+
 extern crate image;
 extern crate nalgebra as na;
 
 use std::collections::hash_set::Intersection;
 use std::fmt::Debug;
-use image::{ImageBuffer, RgbImage, Rgb};
-use na::{Transform3, Point3, UnitVector3, Vector3, Scale3, Scale, Similarity3, Matrix4, UnitQuaternion, Translation3, Unit, Rotation3, Quaternion};
+use image::{ImageBuffer, RgbImage, Rgb, DynamicImage, Rgb32FImage};
+use na::{Transform3, Point3, UnitVector3, Vector3, Scale3, Scale, Similarity3, Matrix4, UnitQuaternion, Translation3, Unit, Rotation3, Quaternion, Point2};
+use crate::lighting::{IntersectData, Light, Material};
+
+pub fn reflect(direction: Vector3<f32>, normal: UnitVector3<f32>) -> UnitVector3<f32> {
+    return UnitVector3::new_normalize(direction - 2.0 * *normal * (direction.dot(&normal)));
+}
 
 pub mod colors {
     use image::Rgb;
@@ -27,11 +35,13 @@ pub struct HitRecord<'a> {
     pub object: &'a dyn Object,
     pub omega: f32,
     pub normal: UnitVector3<f32>,
+    pub point: Point3<f32>
 }
 
 impl<'a> HitRecord<'a> {
-    pub fn new(object: &'a dyn Object, omega: f32, normal: UnitVector3<f32>) -> Self {
-        return HitRecord{object, omega, normal};
+    pub fn new(object: &'a dyn Object, ray: Ray, omega: f32, normal: UnitVector3<f32>,
+               point: Point3<f32>) -> Self {
+        return HitRecord{object, omega, normal, point};
     }
 }
 
@@ -42,8 +52,8 @@ pub enum Shape {
 }
 
 impl Ray {
-    pub fn new(origin: Point3<f32>, direction: Vector3<f32>) -> Ray {
-        return Ray { origin, direction: UnitVector3::new_normalize(direction) };
+    pub fn new(origin: Point3<f32>, direction: UnitVector3<f32>) -> Ray {
+        return Ray { origin, direction };
     }
 }
 
@@ -105,7 +115,9 @@ impl Camera {
         let hph = ph /2.0;
         let hpw = pw /2.0;
 
-        let mut img: RgbImage = ImageBuffer::new(self.img_width, self.img_height);
+        //use DynamicImage to convert
+        let mut fp_buffer: Rgb32FImage = Rgb32FImage::new(self.img_width, self.img_height);
+        //let mut img: RgbImage = ImageBuffer::new(self.img_width, self.img_height);
 
         let mut x: f32 = -(w/2.0) + hpw;
         let mut y: f32 = (h/2.0) - hph;
@@ -115,7 +127,7 @@ impl Camera {
                 let origin = Point3::origin();
                 //println!("{}", origin);
                 let dir = Vector3::new(x, y, z).normalize();
-                let r = Ray::new(origin, dir);
+                let r = Ray::new(origin, UnitVector3::new_normalize(dir));
                 img.put_pixel(j, i, world.spawn_ray(r));
                 x += pw;
             }
@@ -134,6 +146,8 @@ trait Object {
     fn transform(&self) -> &Similarity3<f32>;
     fn transform_mut(&mut self) -> &mut Similarity3<f32>;
 
+    fn get_material(&self) -> &dyn Material;
+
     fn translate(&mut self, x: f32, y: f32, z: f32) {
         let trans = Translation3::new(x, y, z);
         *self.transform_mut() = trans * *self.transform();
@@ -150,7 +164,6 @@ trait Object {
         self.apply_model();
     }
     fn apply_model(&mut self);
-    fn get_color(&self) -> Rgb<u8>;
     fn intersect(&self, ray: &Ray) -> Option<HitRecord>;
 }
 
@@ -209,14 +222,11 @@ impl Object for Sphere {
         self.transform = Similarity3::identity();
     }
 
-    fn get_color(&self) -> Rgb<u8> {
-        return self.color;
+    fn get_material(&self) -> &dyn Material {
+        todo!()
     }
 
     fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
-        let x = ray.origin.x;
-        let y = ray.origin.y;
-        let z = ray.origin.z;
         let b = 2.0 * (ray.direction.dot( &(ray.origin - self.center)));
         let c = (ray.origin - self.center).magnitude_squared() - self.radius * self.radius;
 
@@ -320,10 +330,9 @@ impl Object for Triangle {
         self.transform = Similarity3::identity();
     }
 
-    fn get_color(&self) -> Rgb<u8> {
-        return self.color;
+    fn get_material(&self) -> &dyn Material {
+        todo!()
     }
-
     fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
         let e1 = self.vertices[1] - self.vertices[0];
         let e2 = self.vertices[2] - self.vertices[0];
@@ -351,6 +360,7 @@ impl Object for Triangle {
         //println!("{}, {}, {}", omega, u, v);
 
         let normal = UnitVector3::new_normalize(e1.cross(&e2));
+        let point = ray.origin + ray.direction.scale(omega);
 
         return Some(HitRecord::new(self, omega, normal));
     }
@@ -358,12 +368,14 @@ impl Object for Triangle {
 
 struct World {
     objects: Vec<Box<dyn Object>>,
+    lights: Vec<Light>,
     bg_color: Rgb<u8>,
+    ambient_light: Rgb<f32>,
 }
 
 impl World {
-    pub fn new(bg_color: Rgb<u8>) -> World {
-        return World { objects: vec![], bg_color };
+    pub fn new(bg_color: Rgb<u8>, ambient_light: Rgb<u8>) -> World {
+        return World { objects: vec![], bg_color, ambient_light };
     }
 
     pub fn add(&mut self, object: impl Object + 'static) {
@@ -376,9 +388,31 @@ impl World {
         }
     }
 
-    pub fn spawn_ray(&self, ray: Ray) -> Rgb<u8> {
+    //Spawn a ray and return irradiance
+   pub fn spawn_light_ray(&self, ray: Ray) -> Rgb<f32> {
+        let first_hit = self.spawn_ray(ray);
+        //Is there a first hit record?
+        if let Some(hr) = first_hit {
+            for light in &self.lights {
+                let incoming = UnitVector3::new_normalize(light.position - hr.point);
+
+                let id: IntersectData = IntersectData::new(&hr, incoming, *light);
+                let radiance = hr.object.get_material().illuminate(id, &self);
+
+                //first_hit_record.object.get_material().illuminate(first_hit_record);
+            }
+            None
+            //return first_hit_record.object.get_material().illuminate(first_hit_record);
+        } else {
+            return self.bg_color;
+        }
+    }
+
+    //Spawn a ray and return a hitrecord for the first intersection, if it exists
+    pub fn spawn_ray(&self, ray: Ray) -> Option<HitRecord> {
         let mut first_hit: Option<HitRecord> = None;
 
+        //Check all objects for intersection, return first hit
         for object in &self.objects {
             if let Some(hr) = object.intersect(&ray) {
                 if let Some(ref first_hit_record) = first_hit {
@@ -391,11 +425,7 @@ impl World {
             }
         }
 
-        if let Some(first_hit_record) = first_hit {
-            return first_hit_record.object.get_color()
-        } else {
-            return self.bg_color;
-        }
+        return first_hit;
     }
 }
 
@@ -403,9 +433,9 @@ impl World {
 //The world will convert all its objects to camera space
 fn main() {
     let mut c: Camera = Camera::new(Point3::new(-4.5, 1.6, -10.0), Vector3::z_axis(), Vector3::y_axis(), 5.0, 45.0, 480, 640);
-    c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
-    c.set_pos(-3.5, 10.0, -10.0);
-    let mut w: World = World::new(colors::BLUE);
+    //c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
+    //c.set_pos(-3.5, 10.0, -10.0);
+    let mut w: World = World::new(colors::BLUE, colors::BLUE);
 
     let s1 = Sphere::new_in_world(Point3::new(-3.35, 1.4, -7.0), 0.8, colors::RED, &mut w);
 
@@ -431,5 +461,5 @@ fn main() {
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
-    c.snapshot(&mut w, "assign2render-moved.png");
+    c.snapshot(&mut w, "assign3render.png");
 }
