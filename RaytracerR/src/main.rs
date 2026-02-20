@@ -8,22 +8,27 @@ extern crate nalgebra as na;
 use std::collections::hash_set::Intersection;
 use std::fmt::Debug;
 use image::{ImageBuffer, RgbImage, Rgb, DynamicImage, Rgb32FImage};
+use image::buffer::ConvertBuffer;
 use na::{Transform3, Point3, UnitVector3, Vector3, Scale3, Scale, Similarity3, Matrix4, UnitQuaternion, Translation3, Unit, Rotation3, Quaternion, Point2};
-use crate::lighting::{IntersectData, Light, Material};
+use crate::lighting::{IntersectData, Light, Material, Phong};
+
+const MAX_IRRADIANCE: f32 = 1.0;
+
+const TONE_SLOPE: f32 = (1.0 - 0.0)/(MAX_IRRADIANCE - 0.0);
 
 pub fn reflect(direction: Vector3<f32>, normal: UnitVector3<f32>) -> UnitVector3<f32> {
     return UnitVector3::new_normalize(direction - 2.0 * *normal * (direction.dot(&normal)));
 }
 
 pub mod colors {
-    use image::Rgb;
-    pub const RED : Rgb<u8> = Rgb([255, 0, 0]);
-    pub const GREEN: Rgb<u8> = Rgb([0, 255, 0]);
-    pub const BLUE: Rgb<u8> = Rgb([0, 0, 255]);
-    pub const WHITE : Rgb<u8> = Rgb([255, 255, 255]);
-    pub const BLACK: Rgb<u8> = Rgb([0, 0, 0]);
-
-    pub const YELLOW: Rgb<u8> = Rgb([255, 255, 0]);
+    use na::Vector3;
+    pub const RED : Vector3<f32> = Vector3::new(1.0, 0.0, 0.0);
+    pub const GREEN : Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
+    pub const BLUE : Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
+    pub const SKY_BLUE: Vector3<f32> = Vector3::new(0.53, 0.81, 0.92);
+    pub const YELLOW : Vector3<f32> = Vector3::new(1.0, 1.0, 0.0);
+    pub const WHITE : Vector3<f32> = Vector3::new(1.0, 1.0, 1.0);
+    pub const BLACK : Vector3<f32> = Vector3::new(0.0, 0.0, 0.0);
 }
 
 pub struct Ray {
@@ -39,16 +44,10 @@ pub struct HitRecord<'a> {
 }
 
 impl<'a> HitRecord<'a> {
-    pub fn new(object: &'a dyn Object, ray: Ray, omega: f32, normal: UnitVector3<f32>,
+    pub fn new(object: &'a dyn Object, ray: &Ray, omega: f32, normal: UnitVector3<f32>,
                point: Point3<f32>) -> Self {
-        return HitRecord{object, omega, normal, point};
+        return HitRecord { object, omega, normal, point };
     }
-}
-
-#[derive(Debug)]
-pub enum Shape {
-    Sphere(Sphere),
-    Triangle(Triangle),
 }
 
 impl Ray {
@@ -117,7 +116,7 @@ impl Camera {
 
         //use DynamicImage to convert
         let mut fp_buffer: Rgb32FImage = Rgb32FImage::new(self.img_width, self.img_height);
-        //let mut img: RgbImage = ImageBuffer::new(self.img_width, self.img_height);
+        let mut img: RgbImage = ImageBuffer::new(self.img_width, self.img_height);
 
         let mut x: f32 = -(w/2.0) + hpw;
         let mut y: f32 = (h/2.0) - hph;
@@ -128,12 +127,24 @@ impl Camera {
                 //println!("{}", origin);
                 let dir = Vector3::new(x, y, z).normalize();
                 let r = Ray::new(origin, UnitVector3::new_normalize(dir));
-                img.put_pixel(j, i, world.spawn_ray(r));
+                fp_buffer.put_pixel(j, i, world.spawn_light_ray(r));
                 x += pw;
             }
 
             y -= ph;
             x = -(w/2.0) + hpw;
+        }
+        //Tone Reproduction
+        for (x, y, pixel) in fp_buffer.enumerate_pixels_mut() {
+            let mut pixel_new = Rgb([0, 0, 0]);
+            pixel_new[0] = (pixel[0].clamp(0.0, 1.0) * 255.0) as u8;
+            pixel_new[1] = (pixel[1].clamp(0.0, 1.0) * 255.0) as u8;
+            pixel_new[2] = (pixel[2].clamp(0.0, 1.0) * 255.0) as u8;
+            // pixel_new[0] = ((pixel[0] * TONE_SLOPE).clamp(0.0, 1.0) * 255.0) as u8;
+            // pixel_new[1] = ((pixel[1] * TONE_SLOPE).clamp(0.0, 1.0) * 255.0) as u8;
+            // pixel_new[2] = ((pixel[2] * TONE_SLOPE).clamp(0.0, 1.0) * 255.0) as u8;
+
+            img.put_pixel(x, y, pixel_new);
         }
 
         img.save(format!("output/{}", filename)).unwrap();
@@ -167,27 +178,27 @@ trait Object {
     fn intersect(&self, ray: &Ray) -> Option<HitRecord>;
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Clone)]
 pub struct Sphere {
     center: Point3<f32>,
     radius: f32,
     transform: Similarity3<f32>,
-    color: Rgb<u8>
+    material: Box<dyn Material>,
 }
 
 impl Sphere {
-    pub fn new(center: Point3<f32>, radius: f32, color: Rgb<u8>) -> Self {
-        return Sphere { center, radius, color, transform: Similarity3::identity() };
+    pub fn new(center: Point3<f32>, radius: f32, material: Box<dyn Material>) -> Self {
+        return Sphere { center, radius, material, transform: Similarity3::identity() };
     }
 
-    pub fn new_in_world(center: Point3<f32>, radius: f32, color: Rgb<u8>, world: &mut World) -> Self {
-        let s = Sphere { center, radius, color, transform: Similarity3::identity() };
-        world.add(s);
+    pub fn new_in_world(center: Point3<f32>, radius: f32, material: Box<dyn Material>, world: &mut World) -> Self {
+        let s = Sphere { center, radius, material, transform: Similarity3::identity() };
+        world.add(s.clone());
         return s;
     }
 
-    pub fn new_transformed(center: Point3<f32>, radius: f32, rotation: UnitQuaternion<f32>, scale: f32, color: Rgb<u8>) -> Self {
-        let mut s = Sphere { center, radius, color, transform: Similarity3::from_parts(
+    pub fn new_transformed(center: Point3<f32>, radius: f32, rotation: UnitQuaternion<f32>, scale: f32, material: Box<dyn Material>) -> Self {
+        let mut s = Sphere { center, radius, material, transform: Similarity3::from_parts(
             Translation3::new(center.x, center.y, center.z),
             rotation,
             scale
@@ -215,15 +226,15 @@ impl Object for Sphere {
         return &mut self.transform;
     }
 
+    fn get_material(&self) -> &dyn Material {
+        return self.material.as_ref();
+    }
+
     fn apply_model(&mut self) {
         self.radius = self.radius * self.transform.scaling();
         self.center = self.transform.isometry.translation.transform_point(&self.center);
 
         self.transform = Similarity3::identity();
-    }
-
-    fn get_material(&self) -> &dyn Material {
-        todo!()
     }
 
     fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
@@ -243,56 +254,58 @@ impl Object for Sphere {
             //root1 is least and positive
             if root1 < root2 && root1 > 0.0 {
                 omega = root1;
-            } else {
+            } else if root2 < root1 && root2 > 0.0 {
                 omega = root2;
+            } else {
+                return None;
             }
         }
 
         let point = ray.origin + ray.direction.scale(omega);
         let normal = UnitVector3::new_normalize(point - self.center);
-        return Some(HitRecord::new(self, omega, normal));
+        return Some(HitRecord::new(self, ray, omega, normal, point));
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Triangle {
     vertices: Vec<Point3<f32>>,
     normal: UnitVector3<f32>,
     transform: Similarity3<f32>,
-    color: Rgb<u8>
+    material: Box<dyn Material>,
 }
 
 impl Triangle {
-    pub fn new(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, color: Rgb<u8>) -> Self {
+    pub fn new(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, material: Box<dyn Material>) -> Self {
         //counterclockwise
         let n = (p2 - p1).cross(&(p3-p1));
         return Triangle {
             vertices: vec![p1, p2, p3],
             normal: UnitVector3::new_normalize(n),
-            color,
+            material,
             transform: Similarity3::identity()
         };
     }
 
-    pub fn new_in_world(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, color: Rgb<u8>, world: &mut World) -> Self {
+    pub fn new_in_world(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, material: Box<dyn Material>, world: &mut World) -> Self {
         let n = (p2 - p1).cross(&(p3-p1));
         let t = Triangle {
             vertices: vec![p1, p2, p3],
             normal: UnitVector3::new_normalize(n),
-            color,
+            material,
             transform: Similarity3::identity()
         };
         world.add(t.clone());
         return t;
     }
 
-    pub fn new_transformed(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, position: Point3<f32>, rotation: UnitQuaternion<f32>, scale: f32, color: Rgb<u8>) -> Self {
+    pub fn new_transformed(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, position: Point3<f32>, rotation: UnitQuaternion<f32>, scale: f32, material: Box<dyn Material>) -> Self {
         //counterclockwise
         let n = (p2 - p1).cross(&(p3-p1));
         let mut t = Triangle {
             vertices: vec![p1, p2, p3],
             normal: UnitVector3::new_normalize(n),
-            color,
+            material,
             transform: Similarity3::from_parts(
                 Translation3::new(position.x, position.y, position.z),
                 rotation,
@@ -331,7 +344,7 @@ impl Object for Triangle {
     }
 
     fn get_material(&self) -> &dyn Material {
-        todo!()
+        return self.material.as_ref();
     }
     fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
         let e1 = self.vertices[1] - self.vertices[0];
@@ -362,49 +375,56 @@ impl Object for Triangle {
         let normal = UnitVector3::new_normalize(e1.cross(&e2));
         let point = ray.origin + ray.direction.scale(omega);
 
-        return Some(HitRecord::new(self, omega, normal));
+        return Some(HitRecord::new(self, ray, omega, normal, point));
     }
 }
 
 struct World {
     objects: Vec<Box<dyn Object>>,
     lights: Vec<Light>,
-    bg_color: Rgb<u8>,
-    ambient_light: Rgb<f32>,
+    ambient_light: Vector3<f32>,
 }
 
 impl World {
-    pub fn new(bg_color: Rgb<u8>, ambient_light: Rgb<u8>) -> World {
-        return World { objects: vec![], bg_color, ambient_light };
+    pub fn new(ambient_light: Vector3<f32>) -> World {
+        return World { objects: vec![], lights: vec![], ambient_light};
     }
 
     pub fn add(&mut self, object: impl Object + 'static) {
         self.objects.push(Box::new(object));
+    }
+    pub fn add_light(&mut self, light: Light) {
+        self.lights.push(light);
     }
 
     pub fn convert_all_objects(&mut self, camera: &Camera) {
         for object in &mut self.objects {
             object.convert(&camera.view);
         }
+
+        for light in &mut self.lights {
+            light.position = camera.view.transform_point(&light.position);
+        }
     }
 
     //Spawn a ray and return irradiance
    pub fn spawn_light_ray(&self, ray: Ray) -> Rgb<f32> {
+        let viewing = -ray.direction;
         let first_hit = self.spawn_ray(ray);
         //Is there a first hit record?
         if let Some(hr) = first_hit {
-            for light in &self.lights {
-                let incoming = UnitVector3::new_normalize(light.position - hr.point);
+            let material = hr.object.get_material();
+            let id = IntersectData::new(&hr, viewing, &self.lights);
 
-                let id: IntersectData = IntersectData::new(&hr, incoming, *light);
-                let radiance = hr.object.get_material().illuminate(id, &self);
+            let rad_vec = material.illuminate(id, &self);
+            let rad_color = Rgb([rad_vec.x.min(MAX_IRRADIANCE), rad_vec.y.min(MAX_IRRADIANCE), rad_vec.z.min(MAX_IRRADIANCE)]);
 
-                //first_hit_record.object.get_material().illuminate(first_hit_record);
-            }
-            None
-            //return first_hit_record.object.get_material().illuminate(first_hit_record);
+            return rad_color;
         } else {
-            return self.bg_color;
+            return Rgb([
+                self.ambient_light.x.min(MAX_IRRADIANCE),
+                self.ambient_light.y.min(MAX_IRRADIANCE),
+                self.ambient_light.z.min(MAX_IRRADIANCE)]);
         }
     }
 
@@ -435,17 +455,26 @@ fn main() {
     let mut c: Camera = Camera::new(Point3::new(-4.5, 1.6, -10.0), Vector3::z_axis(), Vector3::y_axis(), 5.0, 45.0, 480, 640);
     //c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
     //c.set_pos(-3.5, 10.0, -10.0);
-    let mut w: World = World::new(colors::BLUE, colors::BLUE);
+    let light1: Light = Light::new(Point3::new(-5.1, 50.0, -40.0), Vector3::new(5.0, 5.0, 5.0));
+    //let light2: Light = Light::new(Point3::new(4.5, 3.0, -10.0), Vector3::new(10.0, 10.0, 10.0));
+    let mut w: World = World::new(colors::SKY_BLUE);
 
-    let s1 = Sphere::new_in_world(Point3::new(-3.35, 1.4, -7.0), 0.8, colors::RED, &mut w);
+    w.add_light(light1);
+    //w.add_light(light2);
 
-    let s2 = Sphere::new_in_world(Point3::new(-4.6, 2.0, -7.5), 1.0, colors::GREEN, &mut w);
+    let mat1 = Phong::new(colors::RED, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
+    let mat2 = Phong::new(colors::GREEN, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
+    let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
+
+    let s1 = Sphere::new_in_world(Point3::new(-3.35, 1.4, -7.0), 0.8, Box::new(mat1), &mut w);
+
+    let s2 = Sphere::new_in_world(Point3::new(-4.6, 2.0, -7.5), 1.0, Box::new(mat2), &mut w);
 
     let mut t1 = Triangle::new(
         Point3::new(-7.0, 0.0, 20.0),
-        Point3::new(-7.0, 0.0, -20.0),
         Point3::new(7.0, 0.0, 20.0),
-        colors::YELLOW);
+        Point3::new(-7.0, 0.0, -20.0),
+        Box::new(mat3));
 
     t1.translate(0.0, 0.0, 0.0);
     t1.rotate(-1.0f32.to_radians(), 0.0, 0.0);
@@ -455,7 +484,7 @@ fn main() {
         Point3::new(7.0, 0.0, -20.0),
         Point3::new(-7.0, 0.0, -20.0),
         Point3::new(7.0, 0.0, 20.0),
-        colors::YELLOW);
+        Box::new(mat3));
 
     t2.translate(0.0, 0.0, 0.0);
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
