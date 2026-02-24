@@ -1,16 +1,18 @@
 #![allow(warnings)]
 
-mod lighting;
-
 extern crate image;
 extern crate nalgebra as na;
+mod lighting;
+mod scene;
+mod primitives;
 
-use std::collections::hash_set::Intersection;
-use std::fmt::Debug;
-use image::{ImageBuffer, RgbImage, Rgb, DynamicImage, Rgb32FImage};
-use image::buffer::ConvertBuffer;
-use na::{Transform3, Point3, UnitVector3, Vector3, Scale3, Scale, Similarity3, Matrix4, UnitQuaternion, Translation3, Unit, Rotation3, Quaternion, Point2};
 use crate::lighting::{IntersectData, Light, Material, Phong};
+use crate::primitives::{Object, Sphere, Triangle};
+use crate::scene::{World, };
+use image::buffer::ConvertBuffer;
+use image::{ImageBuffer, Rgb, Rgb32FImage, RgbImage};
+use na::{Point3, Rotation3, Similarity3, Translation3, UnitQuaternion, UnitVector3, Vector3};
+use std::fmt::Debug;
 
 const MAX_IRRADIANCE: f32 = 1.0;
 
@@ -151,304 +153,6 @@ impl Camera {
     }
 }
 
-trait Object {
-    fn convert(&mut self, view: &Similarity3<f32>);
-
-    fn transform(&self) -> &Similarity3<f32>;
-    fn transform_mut(&mut self) -> &mut Similarity3<f32>;
-
-    fn get_material(&self) -> &dyn Material;
-
-    fn translate(&mut self, x: f32, y: f32, z: f32) {
-        let trans = Translation3::new(x, y, z);
-        *self.transform_mut() = trans * *self.transform();
-        self.apply_model();
-    }
-    fn rotate(&mut self, x: f32, y: f32, z: f32) {
-        let rot = UnitQuaternion::from_euler_angles(x, y, z);
-        *self.transform_mut() = rot * *self.transform();
-        self.apply_model();
-    }
-
-    fn scale(&mut self, s: f32) {
-        self.transform_mut().set_scaling(s);
-        self.apply_model();
-    }
-    fn apply_model(&mut self);
-    fn intersect(&self, ray: &Ray) -> Option<HitRecord>;
-}
-
-#[derive(Clone)]
-pub struct Sphere {
-    center: Point3<f32>,
-    radius: f32,
-    transform: Similarity3<f32>,
-    material: Box<dyn Material>,
-}
-
-impl Sphere {
-    pub fn new(center: Point3<f32>, radius: f32, material: Box<dyn Material>) -> Self {
-        return Sphere { center, radius, material, transform: Similarity3::identity() };
-    }
-
-    pub fn new_in_world(center: Point3<f32>, radius: f32, material: Box<dyn Material>, world: &mut World) -> Self {
-        let s = Sphere { center, radius, material, transform: Similarity3::identity() };
-        world.add(s.clone());
-        return s;
-    }
-
-    pub fn new_transformed(center: Point3<f32>, radius: f32, rotation: UnitQuaternion<f32>, scale: f32, material: Box<dyn Material>) -> Self {
-        let mut s = Sphere { center, radius, material, transform: Similarity3::from_parts(
-            Translation3::new(center.x, center.y, center.z),
-            rotation,
-            scale
-        ) };
-        s.apply_model();
-        return s;
-    }
-}
-
-
-impl Object for Sphere {
-    fn convert(&mut self, view: &Similarity3<f32>) {
-        //Modify internal transform
-        self.transform = view * self.transform;
-
-        //Apply internal transform
-        self.apply_model();
-    }
-
-    fn transform(&self) -> &Similarity3<f32> {
-        return &self.transform;
-    }
-
-    fn transform_mut(&mut self) -> &mut Similarity3<f32> {
-        return &mut self.transform;
-    }
-
-    fn get_material(&self) -> &dyn Material {
-        return self.material.as_ref();
-    }
-
-    fn apply_model(&mut self) {
-        self.radius = self.radius * self.transform.scaling();
-        self.center = self.transform.isometry.translation.transform_point(&self.center);
-
-        self.transform = Similarity3::identity();
-    }
-
-    fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
-        let b = 2.0 * (ray.direction.dot( &(ray.origin - self.center)));
-        let c = (ray.origin - self.center).magnitude_squared() - self.radius * self.radius;
-
-        let determinant = b * b - 4.0 * c;
-        let mut omega = 0.0;
-        if determinant < 0.0 {
-            return None;
-        } else if determinant == 0.0 {
-            omega = (-b)/(2.0);
-        } else {
-            let root1 = (-b + determinant.sqrt()) / 2.0;
-            let root2 = (-b - determinant.sqrt()) / 2.0;
-
-            //root1 is least and positive
-            if root1 < root2 && root1 > 0.0 {
-                omega = root1;
-            } else if root2 < root1 && root2 > 0.0 {
-                omega = root2;
-            } else {
-                return None;
-            }
-        }
-
-        let point = ray.origin + ray.direction.scale(omega);
-        let normal = UnitVector3::new_normalize(point - self.center);
-        return Some(HitRecord::new(self, ray, omega, normal, point));
-    }
-}
-
-#[derive(Clone)]
-pub struct Triangle {
-    vertices: Vec<Point3<f32>>,
-    normal: UnitVector3<f32>,
-    transform: Similarity3<f32>,
-    material: Box<dyn Material>,
-}
-
-impl Triangle {
-    pub fn new(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, material: Box<dyn Material>) -> Self {
-        //counterclockwise
-        let n = (p2 - p1).cross(&(p3-p1));
-        return Triangle {
-            vertices: vec![p1, p2, p3],
-            normal: UnitVector3::new_normalize(n),
-            material,
-            transform: Similarity3::identity()
-        };
-    }
-
-    pub fn new_in_world(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, material: Box<dyn Material>, world: &mut World) -> Self {
-        let n = (p2 - p1).cross(&(p3-p1));
-        let t = Triangle {
-            vertices: vec![p1, p2, p3],
-            normal: UnitVector3::new_normalize(n),
-            material,
-            transform: Similarity3::identity()
-        };
-        world.add(t.clone());
-        return t;
-    }
-
-    pub fn new_transformed(p1: Point3<f32>, p2:Point3<f32>, p3:Point3<f32>, position: Point3<f32>, rotation: UnitQuaternion<f32>, scale: f32, material: Box<dyn Material>) -> Self {
-        //counterclockwise
-        let n = (p2 - p1).cross(&(p3-p1));
-        let mut t = Triangle {
-            vertices: vec![p1, p2, p3],
-            normal: UnitVector3::new_normalize(n),
-            material,
-            transform: Similarity3::from_parts(
-                Translation3::new(position.x, position.y, position.z),
-                rotation,
-                scale
-            )
-        };
-        t.apply_model();
-        return t;
-    }
-}
-
-impl Object for Triangle {
-    fn convert(&mut self, view: &Similarity3<f32>) {
-        //Modify internal transform
-        self.transform = view * self.transform;
-
-        //Apply internal transform
-        self.apply_model();
-    }
-
-    fn transform(&self) -> &Similarity3<f32> {
-        return &self.transform;
-    }
-
-    fn transform_mut(&mut self) -> &mut Similarity3<f32> {
-        return &mut self.transform;
-    }
-
-    fn apply_model(&mut self) {
-        self.vertices = self.vertices.iter()
-            .map(|v| self.transform.transform_point(v)).collect();
-
-        self.normal = UnitVector3::new_normalize(self.transform.transform_vector(&*self.normal));
-
-        self.transform = Similarity3::identity();
-    }
-
-    fn get_material(&self) -> &dyn Material {
-        return self.material.as_ref();
-    }
-    fn intersect(&self, ray: &Ray) -> Option<HitRecord> {
-        let e1 = self.vertices[1] - self.vertices[0];
-        let e2 = self.vertices[2] - self.vertices[0];
-        let t = ray.origin - self.vertices[0];
-        let p = ray.direction.cross(&e2);
-        let q = t.cross(&e1);
-
-        //let temp: Vector3<f32> = Vector3::new(q.dot(&e2), p.dot(&t), q.dot(&ray.direction));
-
-        let denom = p.dot(&e1);
-
-        //Prevent division by zero (no intersection)
-        if denom.abs() < 0.0001 {
-            return None;
-        }
-
-        let omega = q.dot(&e2) / denom;
-        let u = p.dot(&t) / denom;
-        let v = q.dot(&ray.direction) / denom;
-
-        if omega < 0.0 || u < 0.0 || v < 0.0 || u + v > 1.0 {
-            return None;
-        }
-
-        //println!("{}, {}, {}", omega, u, v);
-
-        let normal = UnitVector3::new_normalize(e1.cross(&e2));
-        let point = ray.origin + ray.direction.scale(omega);
-
-        return Some(HitRecord::new(self, ray, omega, normal, point));
-    }
-}
-
-struct World {
-    objects: Vec<Box<dyn Object>>,
-    lights: Vec<Light>,
-    ambient_light: Vector3<f32>,
-}
-
-impl World {
-    pub fn new(ambient_light: Vector3<f32>) -> World {
-        return World { objects: vec![], lights: vec![], ambient_light};
-    }
-
-    pub fn add(&mut self, object: impl Object + 'static) {
-        self.objects.push(Box::new(object));
-    }
-    pub fn add_light(&mut self, light: Light) {
-        self.lights.push(light);
-    }
-
-    pub fn convert_all_objects(&mut self, camera: &Camera) {
-        for object in &mut self.objects {
-            object.convert(&camera.view);
-        }
-
-        for light in &mut self.lights {
-            light.position = camera.view.transform_point(&light.position);
-        }
-    }
-
-    //Spawn a ray and return irradiance
-   pub fn spawn_light_ray(&self, ray: Ray) -> Rgb<f32> {
-        let viewing = -ray.direction;
-        let first_hit = self.spawn_ray(ray);
-        //Is there a first hit record?
-        if let Some(hr) = first_hit {
-            let material = hr.object.get_material();
-            let id = IntersectData::new(&hr, viewing, &self.lights);
-
-            let rad_vec = material.illuminate(id, &self);
-            let rad_color = Rgb([rad_vec.x.min(MAX_IRRADIANCE), rad_vec.y.min(MAX_IRRADIANCE), rad_vec.z.min(MAX_IRRADIANCE)]);
-
-            return rad_color;
-        } else {
-            return Rgb([
-                self.ambient_light.x.min(MAX_IRRADIANCE),
-                self.ambient_light.y.min(MAX_IRRADIANCE),
-                self.ambient_light.z.min(MAX_IRRADIANCE)]);
-        }
-    }
-
-    //Spawn a ray and return a hitrecord for the first intersection, if it exists
-    pub fn spawn_ray(&self, ray: Ray) -> Option<HitRecord> {
-        let mut first_hit: Option<HitRecord> = None;
-
-        //Check all objects for intersection, return first hit
-        for object in &self.objects {
-            if let Some(hr) = object.intersect(&ray) {
-                if let Some(ref first_hit_record) = first_hit {
-                    if hr.omega < first_hit_record.omega {
-                        first_hit = Some(hr);
-                    }
-                } else {
-                    first_hit = Some(hr);
-                }
-            }
-        }
-
-        return first_hit;
-    }
-}
-
 //Objects/Camera must be transformed before adding to the world
 //The world will convert all its objects to camera space
 fn main() {
@@ -476,7 +180,8 @@ fn main() {
         Point3::new(-7.0, 0.0, 20.0),
         Point3::new(7.0, 0.0, 20.0),
         Point3::new(-7.0, 0.0, -20.0),
-        Box::new(mat3));
+        Box::new(mat3), 
+        Similarity3::identity());
 
     t1.translate(0.0, 0.0, 0.0);
     t1.rotate(-1.0f32.to_radians(), 0.0, 0.0);
@@ -486,7 +191,8 @@ fn main() {
         Point3::new(7.0, 0.0, -20.0),
         Point3::new(-7.0, 0.0, -20.0),
         Point3::new(7.0, 0.0, 20.0),
-        Box::new(mat3));
+        Box::new(mat3),
+        Similarity3::identity());
 
     t2.translate(0.0, 0.0, 0.0);
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
