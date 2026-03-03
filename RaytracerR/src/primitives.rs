@@ -1,5 +1,5 @@
 use na::{Point3, Similarity3, Translation3, UnitQuaternion, UnitVector3};
-use crate::lighting::Material;
+use crate::lighting::{IntersectData, Material};
 use crate::{HitRecord, Ray, World};
 use crate::scene::SubdivPlane;
 
@@ -10,8 +10,8 @@ pub struct AABB {
 }
 
 impl AABB {
-    pub fn split(&self, plane: SubdivPlane) -> (Self, Self) {
-        let back_offset = *plane.normal * (1.0 - plane.value);
+    pub fn split(&self, plane: &SubdivPlane) -> (Self, Self) {
+        let back_offset = *plane.normal * (1. - plane.value);
         let front_offset = *plane.normal * plane.value;
         let back_max = self.max - back_offset;
         let front_min = self.min + front_offset;
@@ -20,6 +20,20 @@ impl AABB {
         let front = AABB {min: front_min, max: self.max};
 
         return (back, front);
+    }
+
+    pub fn intersect(&self, other: &AABB) -> bool {
+        if self.min.x > other.max.x || other.min.x > self.max.x {
+            return false;
+        }
+        if self.min.y > other.max.y || other.min.y > self.max.y {
+            return false;
+        }
+        if self.min.z > other.max.z || other.min.z > self.max.z {
+            return false;
+        }
+
+        return true;
     }
 }
 

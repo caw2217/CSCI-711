@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use image::Rgb;
 use na::{UnitVector3, Vector3};
 use crate::{Camera, HitRecord, Ray, MAX_IRRADIANCE};
@@ -37,39 +38,60 @@ pub struct SubdivPlane {
     pub value: f32,
 }
 
-struct KDNode<'a> {
+pub struct KDNode {
     plane: Option<SubdivPlane>,
-    front: Option<&'a KDNode<'a>>,
-    back: Option<&'a KDNode<'a>>,
-    objects: Vec<Box<dyn Object>>,
+    front: Option<Box<KDNode>>,
+    back: Option<Box<KDNode>>,
+    objects: Vec<Rc<dyn Object>>,
 }
 
-impl<'a> KDNode<'a> {
-    pub fn new_leaf(objs: Vec<Box<dyn Object>>) -> KDNode<'a> {
+impl KDNode {
+    pub fn new_leaf(objs: Vec<Rc<dyn Object>>) -> KDNode {
         KDNode {plane: None, front: None, back: None, objects: objs}
     }
 
-    pub fn new_interior(plane: SubdivPlane, front: &'a KDNode, back: &'a KDNode) -> KDNode<'a> {
-        KDNode {plane: Some(plane), front: Some(front), back: Some(front), objects: vec![]}
+    pub fn new_interior(plane: SubdivPlane, front: KDNode, back: KDNode) -> KDNode {
+        KDNode {plane: Some(plane), front: Some(Box::new(front)), back: Some(Box::new(back)), objects: vec![]}
     }
 
-    pub fn get_node(objs: Vec<Box<dyn Object>>, voxel: AABB, axis: Axes) -> KDNode<'a> {
+    pub fn get_node(objs: Vec<Box<dyn Object>>, voxel: AABB) -> KDNode {
+        let shared: Vec<Rc<dyn Object>> = objs.into_iter().map(
+            |o| o.into()).collect();
+
+        return Self::get_node_inner(shared, voxel, Axes::X);
+    }
+
+    fn get_node_inner(objs: Vec<Rc<dyn Object>>, voxel: AABB, axis: Axes) -> KDNode {
         //for now, terminate when 1 object
         if (objs.len() <= 1) {
             return Self::new_leaf(objs);
         }
-        let med = (axis.get().dot(&voxel.max.coords) + axis.get().dot(&voxel.min.coords))/2.0;
-        let plane = SubdivPlane {normal: axis.get(), value: med};
-        let (vfront, vback) = voxel.split(plane);
+        let d = &voxel.max.coords;
+        let total = (axis.get().dot(&voxel.max.coords) - axis.get().dot(&voxel.min.coords)).abs();
+        //let med = ;
+        let plane = SubdivPlane {normal: axis.get(), value: 0.5};
+        let (vfront, vback) = voxel.split(&plane);
 
-        //TODO partition objs
+        let mut ofront: Vec<Rc<dyn Object>> = vec![];
+        let mut oback: Vec<Rc<dyn Object>> = vec![];
 
+        for obj in objs {
+            let shared:Rc<dyn Object> = obj.into();
+            if (vfront.intersect(shared.get_bounding_box())) {
+                ofront.push(Rc::clone(&shared));
+            }
 
+            if (vback.intersect(shared.get_bounding_box())) {
+                oback.push(shared);
+            }
+        }
+        return Self::new_interior(plane, Self::get_node_inner(ofront, vfront, axis.next()),
+                                  Self::get_node_inner(oback, vback, axis.next()));
     }
 }
 
 pub struct World {
-    objects: Vec<Box<dyn Object>>,
+    pub objects: Vec<Box<dyn Object>>,
     lights: Vec<Light>,
     pub ambient_light: Vector3<f32>,
 }

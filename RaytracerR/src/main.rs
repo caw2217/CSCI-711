@@ -7,8 +7,8 @@ mod scene;
 mod primitives;
 
 use crate::lighting::{IntersectData, Light, Material, Phong};
-use crate::primitives::{Object, Sphere, Triangle};
-use crate::scene::{World, };
+use crate::primitives::{Object, Sphere, Triangle, AABB};
+use crate::scene::{KDNode, World};
 use image::buffer::ConvertBuffer;
 use image::{ImageBuffer, Rgb, Rgb32FImage, RgbImage};
 use na::{Point3, Rotation3, Similarity3, Translation3, UnitQuaternion, UnitVector3, Vector3};
@@ -180,7 +180,7 @@ fn main() {
         Point3::new(-7.0, 0.0, 20.0),
         Point3::new(7.0, 0.0, 20.0),
         Point3::new(-7.0, 0.0, -20.0),
-        Box::new(mat3), 
+        Box::new(mat3),
         Similarity3::identity());
 
     t1.translate(0.0, 0.0, 0.0);
@@ -198,5 +198,10 @@ fn main() {
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
-    c.snapshot(&mut w, "assign3render-3lights.png");
+    //c.snapshot(&mut w, "assign3render-3lights.png");
+
+    let root = KDNode::get_node(w.objects,
+                                AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)});
+
+
 }
