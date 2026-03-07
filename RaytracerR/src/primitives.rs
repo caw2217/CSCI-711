@@ -11,8 +11,9 @@ pub struct AABB {
 
 impl AABB {
     pub fn split(&self, plane: &SubdivPlane) -> (Self, Self) {
-        let back_offset = *plane.normal * (1. - plane.value);
-        let front_offset = *plane.normal * plane.value;
+        let dist = (plane.normal.dot(&self.max.coords) - plane.normal.dot(&self.min.coords)).abs();
+        let back_offset = *plane.normal * (dist * (1.0 - plane.value));
+        let front_offset = *plane.normal * dist * plane.value;
         let back_max = self.max - back_offset;
         let front_min = self.min + front_offset;
 

@@ -9,6 +9,7 @@ pub const AXIS_X: UnitVector3<f32> = UnitVector3::new_unchecked(Vector3::new(1.0
 pub const AXIS_Y: UnitVector3<f32> = UnitVector3::new_unchecked(Vector3::new(0.0, 1.0, 0.0));
 pub const AXIS_Z: UnitVector3<f32> = UnitVector3::new_unchecked(Vector3::new(0.0, 0.0, 1.0));
 
+#[derive(PartialEq)]
 pub enum Axes {
     X,
     Y,
@@ -58,19 +59,22 @@ impl KDNode {
         let shared: Vec<Rc<dyn Object>> = objs.into_iter().map(
             |o| o.into()).collect();
 
-        return Self::get_node_inner(shared, voxel, Axes::X);
+        return Self::get_node_inner(shared, voxel, Axes::X, 0);
     }
 
-    fn get_node_inner(objs: Vec<Rc<dyn Object>>, voxel: AABB, axis: Axes) -> KDNode {
+    fn get_node_inner(objs: Vec<Rc<dyn Object>>, voxel: AABB, axis: Axes, rec: i32) -> KDNode {
         //for now, terminate when 1 object
-        if (objs.len() <= 1) {
+        let mut tabs: String = String::from("");
+        for _i in 0..rec {
+            tabs += "\t";
+        }
+        if ((voxel.max - voxel.min).norm() < 1.0) {
+            println!("{}LEAF KD Node: Voxel: min: {} max: {}", tabs, voxel.min, voxel.max);
             return Self::new_leaf(objs);
         }
         let d = &voxel.max.coords;
-        let total = (axis.get().dot(&voxel.max.coords) - axis.get().dot(&voxel.min.coords)).abs();
-        //let med = ;
         let plane = SubdivPlane {normal: axis.get(), value: 0.5};
-        let (vfront, vback) = voxel.split(&plane);
+        let (vback, vfront) = voxel.split(&plane);
 
         let mut ofront: Vec<Rc<dyn Object>> = vec![];
         let mut oback: Vec<Rc<dyn Object>> = vec![];
@@ -85,8 +89,14 @@ impl KDNode {
                 oback.push(shared);
             }
         }
-        return Self::new_interior(plane, Self::get_node_inner(ofront, vfront, axis.next()),
-                                  Self::get_node_inner(oback, vback, axis.next()));
+
+
+
+
+
+        println!("{}KD Node: Voxel: min: {} max: {} front_size: {} back_size: {}", tabs, voxel.min, voxel.max, ofront.len(), oback.len());
+        return Self::new_interior(plane, Self::get_node_inner(ofront, vfront, axis.next(), rec + 1),
+                                  Self::get_node_inner(oback, vback, axis.next(), rec + 1));
     }
 }
 

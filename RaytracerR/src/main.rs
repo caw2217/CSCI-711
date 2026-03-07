@@ -183,8 +183,8 @@ fn main() {
         Box::new(mat3),
         Similarity3::identity());
 
-    t1.translate(0.0, 0.0, 0.0);
-    t1.rotate(-1.0f32.to_radians(), 0.0, 0.0);
+    //t1.translate(0.0, 0.0, 0.0);
+    //t1.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t1);
 
     let mut t2 = Triangle::new(
@@ -194,8 +194,8 @@ fn main() {
         Box::new(mat3),
         Similarity3::identity());
 
-    t2.translate(0.0, 0.0, 0.0);
-    t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
+    //t2.translate(0.0, 0.0, 0.0);
+   // t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
     //c.snapshot(&mut w, "assign3render-3lights.png");
