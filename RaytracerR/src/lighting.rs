@@ -1,5 +1,5 @@
 use image::Rgb;
-use na::{Point3, UnitVector3, Vector3};
+use na::{Point3, UnitVector3, Vector2, Vector3};
 use crate::{reflect, HitRecord, Ray, World};
 use dyn_clone::DynClone;
 
@@ -40,24 +40,25 @@ impl<'a> IntersectData<'a> {
 pub struct Checkerboard {
     color1: Vector3<f32>,
     color2: Vector3<f32>,
-    check_size: f32
+    check_size: f32,
+    offset: Vector2<f32>
 }
 
 impl Checkerboard {
-    pub fn new(color1: Vector3<f32>, color2: Vector3<f32>, check_size: f32) -> Self {
-        Checkerboard{ color1, color2, check_size }
+    pub fn new(color1: Vector3<f32>, color2: Vector3<f32>, check_size: f32, offset: Vector2<f32>) -> Self {
+        Checkerboard{ color1, color2, check_size, offset }
     }
 }
 
 impl Material for Checkerboard {
     fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32> {
-        let u = (id.point.x * self.check_size).floor() as i32;
-        let v = (id.point.z * self.check_size).floor() as i32;
+        let u = (id.point.x * self.check_size + self.offset.x).floor() as i32;
+        let v = (id.point.z * self.check_size + self.offset.y).floor() as i32;
 
         if (u + v) % 2 == 0 {
-            return self.color1;
+            self.color1
         } else {
-            return self.color2;
+            self.color2
         }
     }
 }

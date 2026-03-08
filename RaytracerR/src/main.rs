@@ -11,7 +11,7 @@ use crate::primitives::{Object, Sphere, Triangle, AABB};
 use crate::scene::{KDNode, World};
 use image::buffer::ConvertBuffer;
 use image::{ImageBuffer, Rgb, Rgb32FImage, RgbImage};
-use na::{Point3, Rotation3, Similarity3, Translation3, UnitQuaternion, UnitVector3, Vector3};
+use na::{Point3, Rotation3, Similarity3, Translation3, UnitQuaternion, UnitVector3, Vector2, Vector3};
 use std::fmt::Debug;
 
 const MAX_IRRADIANCE: f32 = 1.0;
@@ -171,7 +171,7 @@ fn main() {
     let mat1 = Phong::new(colors::RED, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     let mat2 = Phong::new(colors::GREEN, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     //let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
-    let mat3 = Checkerboard::new(colors::RED, colors::YELLOW, 1.0);
+    let mat3 = Checkerboard::new(colors::RED, colors::YELLOW, 1.0, Vector2::new(0.5, 0.0));
 
     let s1 = Sphere::new_in_world(Point3::new(-3.35, 1.4, -7.0), 0.8, Box::new(mat1), &mut w);
 
