@@ -6,7 +6,7 @@ mod lighting;
 mod scene;
 mod primitives;
 
-use crate::lighting::{IntersectData, Light, Material, Phong};
+use crate::lighting::{Checkerboard, IntersectData, Light, Material, Phong};
 use crate::primitives::{Object, Sphere, Triangle, AABB};
 use crate::scene::{KDNode, World};
 use image::buffer::ConvertBuffer;
@@ -159,18 +159,19 @@ fn main() {
     let mut c: Camera = Camera::new(Point3::new(-4.5, 1.6, -10.0), Vector3::z_axis(), Vector3::y_axis(), 5.0, 45.0, 480, 640);
     //c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
     //c.set_pos(-3.5, 10.0, -10.0);
-    let light1: Light = Light::new(Point3::new(-10.0, 40.0, -40.0), Vector3::new(5.0, 0.0, 0.0));
-    let light2: Light = Light::new(Point3::new(10.0, 40.0, -40.0), Vector3::new(0.0, 0.0, 5.0));
-    let light3: Light = Light::new(Point3::new(-10.0, 30.0, -60.0), Vector3::new(0.0, 5.0, 0.0));
+    let light1: Light = Light::new(Point3::new(0.0, 40.0, -40.0), Vector3::new(5.0, 5.0, 5.0));
+    //let light2: Light = Light::new(Point3::new(10.0, 40.0, -40.0), Vector3::new(0.0, 0.0, 5.0));
+    //let light3: Light = Light::new(Point3::new(-10.0, 30.0, -60.0), Vector3::new(0.0, 5.0, 0.0));
     let mut w: World = World::new(colors::SKY_BLUE);
 
     w.add_light(light1);
-    w.add_light(light2);
-    w.add_light(light3);
+    //w.add_light(light2);
+    //w.add_light(light3);
 
     let mat1 = Phong::new(colors::RED, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     let mat2 = Phong::new(colors::GREEN, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
-    let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
+    //let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
+    let mat3 = Checkerboard::new(colors::RED, colors::YELLOW, 1.0);
 
     let s1 = Sphere::new_in_world(Point3::new(-3.35, 1.4, -7.0), 0.8, Box::new(mat1), &mut w);
 
@@ -183,8 +184,8 @@ fn main() {
         Box::new(mat3),
         Similarity3::identity());
 
-    //t1.translate(0.0, 0.0, 0.0);
-    //t1.rotate(-1.0f32.to_radians(), 0.0, 0.0);
+    t1.translate(0.0, 0.0, 0.0);
+    t1.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t1);
 
     let mut t2 = Triangle::new(
@@ -194,14 +195,14 @@ fn main() {
         Box::new(mat3),
         Similarity3::identity());
 
-    //t2.translate(0.0, 0.0, 0.0);
-   // t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
+    t2.translate(0.0, 0.0, 0.0);
+    t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
-    //c.snapshot(&mut w, "assign3render-3lights.png");
+    c.snapshot(&mut w, "assign4render.png");
 
-    let root = KDNode::get_node(w.objects,
-                                AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)});
+    //let root = KDNode::get_node(w.objects,
+                               // AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)});
 
 
 }

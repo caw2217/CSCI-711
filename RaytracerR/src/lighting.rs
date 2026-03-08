@@ -5,7 +5,6 @@ use dyn_clone::DynClone;
 
 pub trait Material: DynClone {
     fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32>;
-    fn get_color(&self) -> Vector3<f32>;
 }
 
 dyn_clone::clone_trait_object!(Material);
@@ -38,6 +37,32 @@ impl<'a> IntersectData<'a> {
 }
 
 #[derive(Clone, Copy)]
+pub struct Checkerboard {
+    color1: Vector3<f32>,
+    color2: Vector3<f32>,
+    check_size: f32
+}
+
+impl Checkerboard {
+    pub fn new(color1: Vector3<f32>, color2: Vector3<f32>, check_size: f32) -> Self {
+        Checkerboard{ color1, color2, check_size }
+    }
+}
+
+impl Material for Checkerboard {
+    fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32> {
+        let u = (id.point.x * self.check_size).floor() as i32;
+        let v = (id.point.z * self.check_size).floor() as i32;
+
+        if (u + v) % 2 == 0 {
+            return self.color1;
+        } else {
+            return self.color2;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct Phong {
     base_color: Vector3<f32>,
     specular_color: Vector3<f32>,
@@ -54,7 +79,7 @@ impl Phong {
                diffuse_intensity: f32,
                specular_intensity: f32,
                specular_exponent: f32) -> Self {
-        Phong{base_color, specular_color, ambient_intensity, diffuse_intensity, specular_intensity, specular_exponent}
+        Phong { base_color, specular_color, ambient_intensity, diffuse_intensity, specular_intensity, specular_exponent }
     }
 }
 
@@ -92,9 +117,5 @@ impl Material for Phong {
         specular *= self.specular_intensity;
 
         return (ambient + diffuse + specular);
-    }
-    
-    fn get_color(&self) -> Vector3<f32> {
-        return self.base_color;
     }
 }
