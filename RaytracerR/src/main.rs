@@ -41,14 +41,15 @@ pub struct Ray {
 pub struct HitRecord<'a> {
     pub object: &'a dyn Object,
     pub omega: f32,
+    pub is_vol: bool,
     pub normal: UnitVector3<f32>,
     pub point: Point3<f32>
 }
 
 impl<'a> HitRecord<'a> {
-    pub fn new(object: &'a dyn Object, ray: &Ray, omega: f32, normal: UnitVector3<f32>,
+    pub fn new(object: &'a dyn Object, ray: &Ray, omega: f32, is_vol: bool, normal: UnitVector3<f32>,
                point: Point3<f32>) -> Self {
-        return HitRecord { object, omega, normal, point };
+        return HitRecord { object, omega, is_vol, normal, point };
     }
 }
 

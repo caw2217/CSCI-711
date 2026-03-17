@@ -5,6 +5,7 @@ use dyn_clone::DynClone;
 
 pub trait Material: DynClone {
     fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32>;
+    fn is_vol(&self) -> bool;
 }
 
 dyn_clone::clone_trait_object!(Material);
@@ -60,6 +61,10 @@ impl Material for Checkerboard {
         } else {
             self.color2
         }
+    }
+
+    fn is_vol(&self) -> bool {
+        false
     }
 }
 
@@ -118,5 +123,9 @@ impl Material for Phong {
         specular *= self.specular_intensity;
 
         return (ambient + diffuse + specular);
+    }
+
+    fn is_vol(&self) -> bool {
+        false
     }
 }

@@ -159,7 +159,7 @@ impl Object for Sphere {
 
         let point = ray.origin + ray.direction.scale(omega);
         let normal = UnitVector3::new_normalize(point - self.center);
-        return Some(HitRecord::new(self, ray, omega, normal, point));
+        return Some(HitRecord::new(self, ray, omega, self.material.is_vol(), normal, point));
     }
 }
 
@@ -271,7 +271,7 @@ impl Object for Triangle {
         let normal = UnitVector3::new_normalize(e1.cross(&e2));
         let point = ray.origin + ray.direction.scale(omega);
 
-        return Some(HitRecord::new(self, ray, omega, normal, point));
+        return Some(HitRecord::new(self, ray, omega, self.material.is_vol(), normal, point));
     }
 
     fn get_bounding_box(&self) -> &AABB {
