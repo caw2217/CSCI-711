@@ -42,12 +42,16 @@ pub struct Checkerboard {
     color1: Vector3<f32>,
     color2: Vector3<f32>,
     check_size: f32,
-    offset: Vector2<f32>
+    offset: Vector2<f32>,
+    phong1: Phong,
+    phong2: Phong,
 }
 
 impl Checkerboard {
     pub fn new(color1: Vector3<f32>, color2: Vector3<f32>, check_size: f32, offset: Vector2<f32>) -> Self {
-        Checkerboard{ color1, color2, check_size, offset }
+        let phong1 = Phong::new(color1, Vector3::new(1.0, 1.0, 1.0), 0.1, 0.1, 0.1, 6.0);
+        let phong2 = Phong::new(color2, Vector3::new(1.0, 1.0, 1.0), 0.1, 0.1, 0.1, 6.0);
+        Checkerboard{ color1, color2, check_size, offset, phong1, phong2}
     }
 }
 
@@ -57,9 +61,9 @@ impl Material for Checkerboard {
         let v = (id.point.z * self.check_size + self.offset.y).floor() as i32;
 
         if (u + v) % 2 == 0 {
-            self.color1
+            return self.phong1.illuminate(id, world);
         } else {
-            self.color2
+            return self.phong2.illuminate(id, world);
         }
     }
 
