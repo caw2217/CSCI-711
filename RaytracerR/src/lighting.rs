@@ -3,8 +3,10 @@ use na::{Point3, UnitVector3, Vector2, Vector3};
 use crate::{reflect, HitRecord, Ray, World};
 use dyn_clone::DynClone;
 
+const MAX_DEPTH: i32 = 10;
+
 pub trait Material: DynClone {
-    fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32>;
+    fn illuminate(&self, id: IntersectData, world: &World, depth: i32) -> Vector3<f32>;
     fn is_vol(&self) -> bool;
 }
 
@@ -49,21 +51,21 @@ pub struct Checkerboard {
 
 impl Checkerboard {
     pub fn new(color1: Vector3<f32>, color2: Vector3<f32>, check_size: f32, offset: Vector2<f32>) -> Self {
-        let phong1 = Phong::new(color1, Vector3::new(1.0, 1.0, 1.0), 0.1, 0.1, 0.1, 6.0);
-        let phong2 = Phong::new(color2, Vector3::new(1.0, 1.0, 1.0), 0.1, 0.1, 0.1, 6.0);
+        let phong1 = Phong::new(color1, Vector3::new(1.0, 1.0, 1.0), 0.1, 0.1, 0.1, 6.0, 0.0, 0.0);
+        let phong2 = Phong::new(color2, Vector3::new(1.0, 1.0, 1.0), 0.1, 0.1, 0.1, 6.0, 0.0, 0.0);
         Checkerboard{ color1, color2, check_size, offset, phong1, phong2}
     }
 }
 
 impl Material for Checkerboard {
-    fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32> {
+    fn illuminate(&self, id: IntersectData, world: &World, depth: i32) -> Vector3<f32> {
         let u = (id.point.x * self.check_size + self.offset.x).floor() as i32;
         let v = (id.point.z * self.check_size + self.offset.y).floor() as i32;
 
         if (u + v) % 2 == 0 {
-            return self.phong1.illuminate(id, world);
+            return self.phong1.illuminate(id, world, 1);
         } else {
-            return self.phong2.illuminate(id, world);
+            return self.phong2.illuminate(id, world, 1);
         }
     }
 
@@ -79,7 +81,9 @@ pub struct Phong {
     ambient_intensity: f32,
     diffuse_intensity: f32,
     specular_intensity: f32,
-    specular_exponent: f32
+    specular_exponent: f32,
+    reflectance: f32,
+    transmittance: f32,
 }
 
 impl Phong {
@@ -88,15 +92,17 @@ impl Phong {
                ambient_intensity: f32,
                diffuse_intensity: f32,
                specular_intensity: f32,
-               specular_exponent: f32) -> Self {
-        Phong { base_color, specular_color, ambient_intensity, diffuse_intensity, specular_intensity, specular_exponent }
+               specular_exponent: f32,
+               reflectance: f32,
+               transmittance: f32) -> Self {
+        Phong { base_color, specular_color, ambient_intensity, diffuse_intensity, specular_intensity, specular_exponent, reflectance, transmittance }
     }
 }
 
 impl Material for Phong {
 
     //Returns the radiance
-    fn illuminate(&self, id: IntersectData, world: &World) -> Vector3<f32> {
+    fn illuminate(&self, id: IntersectData, world: &World, depth: i32) -> Vector3<f32> {
 
         let mut ambient = self.ambient_intensity * self.base_color.component_mul(&world.ambient_light);
 
@@ -126,7 +132,26 @@ impl Material for Phong {
         diffuse *= self.diffuse_intensity;
         specular *= self.specular_intensity;
 
-        return (ambient + diffuse + specular);
+        let mut retcolor = ambient + diffuse + specular;
+
+        if depth < MAX_DEPTH {
+            if self.reflectance > 0.0 {
+                let reflect_ray = Ray::new(id.point, reflect(*-id.viewing, id.normal));
+                let rf_view = -reflect_ray.direction;
+                let rf_fh = world.spawn_ray(reflect_ray);
+
+                if let Some(rf_hr) = rf_fh {
+                    let rf_id = IntersectData::new(&rf_hr, -rf_view, &id.lights);
+                    retcolor += self.reflectance * rf_hr.object.get_material().illuminate(rf_id, &world, depth + 1);
+                } else {
+                    retcolor += self.reflectance * &world.ambient_light;
+                }
+            }
+
+            //transmittance
+        }
+
+        return retcolor;
     }
 
     fn is_vol(&self) -> bool {

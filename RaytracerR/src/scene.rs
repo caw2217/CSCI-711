@@ -152,7 +152,7 @@ impl World {
     }
 
     //Spawn a ray and return irradiance
-    pub fn spawn_light_ray(&self, ray: Ray) -> Rgb<f32> {
+    pub fn spawn_vol_light_ray(&self, ray: Ray) -> Rgb<f32> {
         let origin = ray.origin;
         let dir = ray.direction;
         let viewing = -ray.direction;
@@ -284,7 +284,7 @@ impl World {
             let id_cpy = IntersectData::new(&hr, viewing, &self.lights);
 
             //Surface radiance
-            let rad_vec = material.illuminate(id, &self);
+            let rad_vec = material.illuminate(id, &self, 1);
             let reduced_surface_radiance = transmittance.component_mul(&rad_vec);
             total += reduced_surface_radiance;
         }
@@ -294,27 +294,47 @@ impl World {
         return rad_color;
     }
 
-    pub fn traverse_tree(curr_node: &KDNode, ray: &Ray) -> Option<HitRecord> {
-        if (curr_node.back.is_none() && curr_node.front.is_none()) {
-            let mut first_hit: Option<HitRecord> = None;
-            //Check all objects for intersection, return first hit
-            for object in &curr_node.objects {
-                if let Some(hr) = object.intersect(&ray) {
-                    if let Some(ref first_hit_record) = first_hit {
-                        if hr.omega < first_hit_record.omega {
-                            first_hit = Some(hr);
-                        }
-                    } else {
-                        first_hit = Some(hr);
-                    }
-                }
-            }
+    pub fn spawn_light_ray(&self, ray: Ray) -> Rgb<f32> {
+        let viewing = -ray.direction;
+        let first_hit = self.spawn_ray(ray);
+        //Is there a first hit record?
+        if let Some(hr) = first_hit {
+            let material = hr.object.get_material();
+            let id = IntersectData::new(&hr, viewing, &self.lights);
 
-            return first_hit;
+            let rad_vec = material.illuminate(id, &self, 1);
+            let rad_color = Rgb([rad_vec.x.min(MAX_IRRADIANCE), rad_vec.y.min(MAX_IRRADIANCE), rad_vec.z.min(MAX_IRRADIANCE)]);
+
+            return rad_color;
         } else {
-            
+            return Rgb([
+                self.ambient_light.x.min(MAX_IRRADIANCE),
+                self.ambient_light.y.min(MAX_IRRADIANCE),
+                self.ambient_light.z.min(MAX_IRRADIANCE)]);
         }
     }
+
+    // pub fn traverse_tree(curr_node: &KDNode, ray: &Ray) -> Option<HitRecord> {
+    //     if (curr_node.back.is_none() && curr_node.front.is_none()) {
+    //         let mut first_hit: Option<HitRecord> = None;
+    //         //Check all objects for intersection, return first hit
+    //         for object in &curr_node.objects {
+    //             if let Some(hr) = object.intersect(&ray) {
+    //                 if let Some(ref first_hit_record) = first_hit {
+    //                     if hr.omega < first_hit_record.omega {
+    //                         first_hit = Some(hr);
+    //                     }
+    //                 } else {
+    //                     first_hit = Some(hr);
+    //                 }
+    //             }
+    //         }
+    //
+    //         return first_hit;
+    //     } else {
+    //
+    //     }
+    // }
 
     //Spawn a ray and return a hitrecord for the first intersection, if it exists
     pub fn spawn_ray(&self, ray: Ray) -> Option<HitRecord> {
