@@ -1,10 +1,13 @@
 use std::f32::consts::{E, PI};
+use std::mem;
 use std::rc::Rc;
+use std::thread::current;
 use image::Rgb;
 use na::{distance, Point3, UnitVector3, Vector3};
 use rand::{random, random_range, rng};
 use rand::distr::Distribution;
 use rand_distr::{UnitSphere, Exp};
+use rand_distr::num_traits::abs;
 use crate::{Camera, HitRecord, Ray, MAX_IRRADIANCE};
 use crate::lighting::{IntersectData, Light, Phong};
 use crate::primitives::{Object, Sphere, AABB};
@@ -115,13 +118,15 @@ impl KDNode {
 
 pub struct World {
     pub objects: Vec<Box<dyn Object>>,
+    pub kdtree: KDNode,
     lights: Vec<Light>,
     pub ambient_light: Vector3<f32>,
 }
 
 impl World {
     pub fn new(ambient_light: Vector3<f32>) -> World {
-        return World { objects: vec![], lights: vec![], ambient_light};
+        let kdtree = KDNode::new_leaf(vec![]);
+        return World { objects: vec![], lights: vec![], ambient_light, kdtree};
     }
 
     pub fn add(&mut self, object: impl Object + 'static) {
@@ -141,221 +146,181 @@ impl World {
         }
     }
 
+    pub fn build_kdtree(&mut self) {
+        let objects = mem::take(&mut self.objects);
+        self.kdtree = KDNode::get_node(objects, AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)})
+    }
+
     //Spawn a ray and return irradiance
     pub fn spawn_light_ray(&self, ray: Ray) -> Rgb<f32> {
         let origin = ray.origin;
         let dir = ray.direction;
         let viewing = -ray.direction;
         let first_hit = self.spawn_ray(ray);
-        //Is there a first hit record?
-        if let Some(hr) = first_hit {
+
+        let max_dist: f32 = if let Some(hr) = &first_hit {
+            hr.omega
+        } else {
+            50.0
+        };
+
+        //Transmission (homogenous medium for now)
+        //rough extinction coeff of air, in m^-1
+        //for now assume we start and end in medium
+        let scatter_coeff: Vector3<f32> = Vector3::new(0.5, 0.5, 0.5);
+        let absorption_coeff: Vector3<f32> = Vector3::new(0.001, 0.001, 0.001);
+        let extinction_coeff: Vector3<f32> = scatter_coeff + absorption_coeff;
+        let optical_depth: Vector3<f32> = extinction_coeff.scale(max_dist);
+        let transmittance: Vector3<f32> = Vector3::new(E.powf(-optical_depth.x), E.powf(-optical_depth.y), E.powf(-optical_depth.z));
+
+        //In scatter
+        let step: f32 = 0.5;
+        let mut t: f32 = random_range(0.0..step);
+
+        let mut in_transmittance: Vector3<f32> = Vector3::new(1.0, 1.0, 1.0);
+        //for now, isotropic phase function
+        let phase = 1.0 / (4.0 * PI);
+        let mut in_scatter= Vector3::zeros();
+        let mut emitted: Vector3<f32> = Vector3::zeros();
+
+        while t < max_dist {
+            let curr_point = origin + dir.scale(t);
+            //calculate transmittance change
+            let att = (-extinction_coeff * step).map(|x| x.exp());
+            in_transmittance = in_transmittance.component_mul(&att);
+
+            //scatter coeff
+
+            //in-scatter radiance
+            //single scatter (no loop for now, doing one pass of monte carlo
+            //only using point lights right now, so no need for monte carlo i think
+            let mut ls: Vector3<f32> = Vector3::zeros();
+            for light in &self.lights {
+                let light_power = &light.intensity;
+                let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&curr_point, &light.position));
+                let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
+                let dir_to_light = UnitVector3::new_normalize(light.position - curr_point);
+
+                let shadow_ray = Ray::new(curr_point + dir_to_light.scale(0.01), dir_to_light);
+
+                let mut v: f32 = 1.0;
+
+                if let Some(sh) = self.spawn_ray(shadow_ray) {
+                    if sh.omega < distance(&light.position, &curr_point) {
+                        v = 0.0;
+                    }
+                }
+                //not sure if i need visibility, phong is calculating shadows
+                let h: f32 = 1.0/(curr_point - light.position).magnitude_squared();
+
+                ls += (light_power * phase * h * v).component_mul(&trans_between_light);
+            }
+
+            ls += self.ambient_light;
+
+            //multi scattering
+            let N = 8;
+            let mut lm: Vector3<f32> = Vector3::zeros();
+            for i in 0..N {
+                let random_w = sample_sphere_uniform();
+                let random_r = rand_distr::Exp::new(extinction_coeff.x).unwrap().sample(&mut rng());
+                let next_point = curr_point  + random_w.scale(random_r); //x prime
+                //same phase
+                let opt = extinction_coeff.scale(distance(&curr_point, &next_point));
+                let tr = Vector3::new(-opt.x.exp(), -opt.y.exp(), -opt.z.exp());
+                //scatter
+
+                //ugh dupe code for now
+                //only double scatter for now
+
+                //multi scattering (recurs)
+                // let random_w2 = sample_sphere_uniform();
+                // let random_r2 = rand_distr::Exp::new(extinction_coeff.x).unwrap().sample(&mut rng());
+                // let next_point2 = next_point  + random_w2.scale(random_r2); //x prime
+                // //same phase
+                // let opt2 = extinction_coeff.scale(distance(&next_point, &next_point2));
+                // let tr2 = Vector3::new(-opt2.x.exp(), -opt2.y.exp(), -opt2.z.exp());
+                //scatter
+
+                let mut li = Vector3::zeros();
+                for light in &self.lights {
+                    let light_power = &light.intensity;
+                    let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&next_point, &light.position));
+                    let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
+                    let dir_to_light = UnitVector3::new_normalize(light.position - curr_point);
+                    //not sure if i need visibility, phong is calculating shadows
+                    let h: f32 = 1.0/(next_point - light.position).magnitude_squared();
+                    let shadow_ray = Ray::new(curr_point + dir_to_light.scale(0.01), dir_to_light);
+
+                    let mut v: f32 = 1.0;
+
+                    if let Some(sh) = self.spawn_ray(shadow_ray) {
+                        if sh.omega < distance(&light.position, &curr_point) {
+                            v = 0.0;
+                        }
+                    }
+
+                    li += (light_power * phase * h * v).component_mul(&trans_between_light);
+                }
+
+                //for now skip v
+                let prob_r = extinction_coeff[0] * (-extinction_coeff[0] * random_r).exp();
+                let prob_w = 1.0/(4.0 * PI);
+                lm += (tr * phase).component_mul(&scatter_coeff).component_mul(&li).scale(1.0/(prob_w * prob_r));
+            }
+
+            emitted += in_transmittance.component_mul(&absorption_coeff).component_mul(&Vector3::new(0.1, 0.1, 0.1)) * step;
+
+            in_scatter += in_transmittance.component_mul(&scatter_coeff).component_mul(&(ls + lm)) * step;
+
+            t += step;
+        }
+
+        let mut total = emitted + in_scatter;
+
+        if let Some(hr) = &first_hit {
             let material = hr.object.get_material();
             let id = IntersectData::new(&hr, viewing, &self.lights);
             let id_cpy = IntersectData::new(&hr, viewing, &self.lights);
 
             //Surface radiance
             let rad_vec = material.illuminate(id, &self);
-            //let rad_color = Rgb([rad_vec.x.min(MAX_IRRADIANCE), rad_vec.y.min(MAX_IRRADIANCE), rad_vec.z.min(MAX_IRRADIANCE)]);
-
-            //Transmission (homogenous medium for now)
-            //rough extinction coeff of air, in m^-1
-            //for now assume we start and end in medium
-            let extinction_coeff: Vector3<f32> = Vector3::new(0.5, 0.5, 0.5);
-            let scatter_coeff: Vector3<f32> = Vector3::new(0.5, 0.5, 0.5);
-            let optical_depth: Vector3<f32> = extinction_coeff.scale(hr.omega);
-            let transmittance: Vector3<f32> = Vector3::new(E.powf(-optical_depth.x), E.powf(-optical_depth.y), E.powf(-optical_depth.z));
-
             let reduced_surface_radiance = transmittance.component_mul(&rad_vec);
+            total += reduced_surface_radiance;
+        }
 
-            //In scatter
-            let step: f32 = 0.5;
-            let mut t: f32 = random_range(0.0..step);
+        let rad_color = Rgb([total.x.min(MAX_IRRADIANCE), total.y.min(MAX_IRRADIANCE), total.z.min(MAX_IRRADIANCE)]);
 
-            let mut in_transmittance: Vector3<f32> = Vector3::new(1.0, 1.0, 1.0);
-            //for now, isotropic phase function
-            let phase = 1.0 / (4.0 * PI);
-            let mut in_scatter= Vector3::zeros();
+        return rad_color;
+    }
 
-            while t < hr.omega {
-                let curr_point = origin + dir.scale(t);
-                //calculate transmittance change
-                let att = (-extinction_coeff * step).map(|x| x.exp());
-                in_transmittance = in_transmittance.component_mul(&att);
-
-                //scatter coeff
-
-                //in-scatter radiance
-                //single scatter (no loop for now, doing one pass of monte carlo
-                //only using point lights right now, so no need for monte carlo i think
-                let mut ls: Vector3<f32> = Vector3::zeros();
-                for light in &self.lights {
-                    let light_power = &light.intensity;
-                    let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&curr_point, &light.position));
-                    let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
-                    //not sure if i need visibility, phong is calculating shadows
-                    let h: f32 = 1.0/(curr_point - light.position).magnitude_squared();
-
-                    ls += (light_power * phase * h).component_mul(&trans_between_light);
-                }
-
-                //multi scattering
-                let N = 8;
-                let mut lm: Vector3<f32> = Vector3::zeros();
-                for i in 0..N {
-                    let random_w = sample_sphere_uniform();
-                    let random_r = rand_distr::Exp::new(extinction_coeff.x).unwrap().sample(&mut rng());
-                    let next_point = curr_point  + random_w.scale(random_r); //x prime
-                    //same phase
-                    let opt = extinction_coeff.scale(distance(&curr_point, &next_point));
-                    let tr = Vector3::new(-opt.x.exp(), -opt.y.exp(), -opt.z.exp());
-                    //scatter
-
-                    //ugh dupe code for now
-                    //only double scatter for now
-
-                    //multi scattering (recurs)
-                    // let random_w2 = sample_sphere_uniform();
-                    // let random_r2 = rand_distr::Exp::new(extinction_coeff.x).unwrap().sample(&mut rng());
-                    // let next_point2 = next_point  + random_w2.scale(random_r2); //x prime
-                    // //same phase
-                    // let opt2 = extinction_coeff.scale(distance(&next_point, &next_point2));
-                    // let tr2 = Vector3::new(-opt2.x.exp(), -opt2.y.exp(), -opt2.z.exp());
-                    //scatter
-
-                    let mut li = Vector3::zeros();
-                    for light in &self.lights {
-                        let light_power = &light.intensity;
-                        let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&next_point, &light.position));
-                        let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
-                        //not sure if i need visibility, phong is calculating shadows
-                        let h: f32 = 1.0/(next_point - light.position).magnitude_squared();
-
-                        li += (light_power * phase * h).component_mul(&trans_between_light);
+    pub fn traverse_tree(curr_node: &KDNode, ray: &Ray) -> Option<HitRecord> {
+        if (curr_node.back.is_none() && curr_node.front.is_none()) {
+            let mut first_hit: Option<HitRecord> = None;
+            //Check all objects for intersection, return first hit
+            for object in &curr_node.objects {
+                if let Some(hr) = object.intersect(&ray) {
+                    if let Some(ref first_hit_record) = first_hit {
+                        if hr.omega < first_hit_record.omega {
+                            first_hit = Some(hr);
+                        }
+                    } else {
+                        first_hit = Some(hr);
                     }
-
-                    //for now skip v
-                    let prob_r = extinction_coeff[0] * (-extinction_coeff[0] * random_r).exp();
-                    let prob_w = 1.0/(4.0 * PI);
-                    lm += (tr * phase).component_mul(&scatter_coeff).component_mul(&li).scale(1.0/(prob_w * prob_r));
                 }
-
-                in_scatter += (ls) * step;
-
-                t += step;
             }
 
-            let total = reduced_surface_radiance + in_transmittance.component_mul(&scatter_coeff).component_mul(&in_scatter);
-
-            let rad_color = Rgb([total.x.min(MAX_IRRADIANCE), total.y.min(MAX_IRRADIANCE), total.z.min(MAX_IRRADIANCE)]);
-
-            return rad_color;
+            return first_hit;
         } else {
-            //Surface radiance
-            let rad_vec = self.ambient_light;
-            let max_dist: f32 = 10.0;
-            //let rad_color = Rgb([rad_vec.x.min(MAX_IRRADIANCE), rad_vec.y.min(MAX_IRRADIANCE), rad_vec.z.min(MAX_IRRADIANCE)]);
-
-            //Transmission (homogenous medium for now)
-            //rough extinction coeff of air, in m^-1
-            //for now assume we start and end in medium
-            let extinction_coeff: Vector3<f32> = Vector3::new(0.5, 0.5, 0.5);
-            let scatter_coeff: Vector3<f32> = Vector3::new(0.5, 0.5, 0.5);
-            let optical_depth: Vector3<f32> = extinction_coeff.scale(max_dist);
-            let transmittance: Vector3<f32> = Vector3::new(E.powf(-optical_depth.x), E.powf(-optical_depth.y), E.powf(-optical_depth.z));
-
-            let reduced_surface_radiance = transmittance.component_mul(&rad_vec);
-
-            //In scatter
-            let step: f32 = 0.5;
-            let mut t: f32 = random_range(0.0..step);
-
-            let mut in_transmittance: Vector3<f32> = Vector3::new(1.0, 1.0, 1.0);
-
-            //for now, isotropic phase function
-            let phase = 1.0 / (4.0 * PI);
-            let mut in_scatter= Vector3::zeros();
-
-            while t < max_dist {
-                let curr_point = origin + dir.scale(t);
-                //calculate transmittance change
-                let att = (-extinction_coeff * step).map(|x| x.exp());
-                in_transmittance = in_transmittance.component_mul(&att);
-
-                //scatter coeff
-
-                //in-scatter radiance
-                //single scatter (no loop for now, doing one pass of monte carlo
-                //only using point lights right now, so no need for monte carlo i think
-                let mut ls: Vector3<f32> = Vector3::zeros();
-                for light in &self.lights {
-                    let light_power = &light.intensity;
-                    let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&curr_point, &light.position));
-                    let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
-                    //not sure if i need visibility, phong is calculating shadows
-                    let h: f32 = 1.0/(curr_point - light.position).magnitude_squared();
-
-                    ls += (light_power * phase * h).component_mul(&trans_between_light);
-                }
-
-                //multi scattering
-                let N = 8;
-                let mut lm: Vector3<f32> = Vector3::zeros();
-                for i in 0..N {
-                    let random_w = sample_sphere_uniform();
-                    let random_r = rand_distr::Exp::new(extinction_coeff.x).unwrap().sample(&mut rng());
-                    let next_point = curr_point  + random_w.scale(random_r); //x prime
-                    //same phase
-                    let opt = extinction_coeff.scale(distance(&curr_point, &next_point));
-                    let tr = Vector3::new(-opt.x.exp(), -opt.y.exp(), -opt.z.exp());
-                    //scatter
-
-                    //ugh dupe code for now
-                    //only double scatter for now
-
-                    //multi scattering (recurs)
-                    // let random_w2 = sample_sphere_uniform();
-                    // let random_r2 = rand_distr::Exp::new(extinction_coeff.x).unwrap().sample(&mut rng());
-                    // let next_point2 = next_point  + random_w2.scale(random_r2); //x prime
-                    // //same phase
-                    // let opt2 = extinction_coeff.scale(distance(&next_point, &next_point2));
-                    // let tr2 = Vector3::new(-opt2.x.exp(), -opt2.y.exp(), -opt2.z.exp());
-                    //scatter
-
-                    let mut li = Vector3::zeros();
-                    for light in &self.lights {
-                        let light_power = &light.intensity;
-                        let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&next_point, &light.position));
-                        let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
-                        //not sure if i need visibility, phong is calculating shadows
-                        let h: f32 = 1.0/(next_point - light.position).magnitude_squared();
-
-                        li += (light_power * phase * h).component_mul(&trans_between_light);
-                    }
-
-                    //for now skip v
-                    let prob_r = extinction_coeff[0] * (-extinction_coeff[0] * random_r).exp();
-                    let prob_w = 1.0/(4.0 * PI);
-                    lm += (tr * phase).component_mul(&scatter_coeff).component_mul(&li).scale(1.0/(prob_w * prob_r));
-                }
-
-                in_scatter += ls * step;
-
-                t += step;
-            }
-
-            //let background = in_transmittance.component_mul(&self.ambient_light);
-
-            let total = reduced_surface_radiance + in_transmittance.component_mul(&scatter_coeff).component_mul(&in_scatter);
-
-            let rad_color = Rgb([total.x.min(MAX_IRRADIANCE), total.y.min(MAX_IRRADIANCE), total.z.min(MAX_IRRADIANCE)]);
-
-            return rad_color;
+            
         }
     }
 
     //Spawn a ray and return a hitrecord for the first intersection, if it exists
     pub fn spawn_ray(&self, ray: Ray) -> Option<HitRecord> {
         let mut first_hit: Option<HitRecord> = None;
+
+
 
         //Check all objects for intersection, return first hit
         for object in &self.objects {
