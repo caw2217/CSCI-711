@@ -148,7 +148,45 @@ impl Material for Phong {
                 }
             }
 
-            //transmittance
+            if self.transmittance > 0.0 {
+                let i = -id.viewing;
+                let mut n_i: f32;
+                let mut n_t: f32;
+                let mut used_n: UnitVector3<f32> = id.normal;
+                if i.dot(&*id.normal) < 0.0 {
+                    used_n = -used_n;
+                    n_i = 1.0;
+                    n_t = 1.0;
+                } else {
+                    n_i = 1.0;
+                    n_t = 1.0;
+                }
+                let eta = (n_i)/(n_t);
+                let cos = (-i.dot(&*used_n)).clamp(-1.0, 1.0);
+                let sin2_t = eta * eta * (1.0 - cos * cos);
+
+                let mut t_dir: UnitVector3<f32>;
+                if sin2_t > 1.0 {
+                    t_dir = reflect(*i, used_n);
+                } else {
+                    let cos_t = (1.0 - sin2_t).sqrt();
+
+                    t_dir = UnitVector3::new_normalize(
+                        i.scale(eta)
+                            + used_n.scale(eta * cos - cos_t)
+                    );
+                }
+                let trans_ray = Ray::new(id.point + t_dir.scale(0.001), t_dir);
+                let tf_view = -trans_ray.direction;
+                let tf_fh = world.spawn_ray(trans_ray);
+
+                if let Some(tf_hr) = tf_fh {
+                    let tf_id = IntersectData::new(&tf_hr, -tf_view, &id.lights);
+                    retcolor += self.transmittance * tf_hr.object.get_material().illuminate(tf_id, &world, depth + 1);
+                } else {
+                    retcolor += self.transmittance * &world.ambient_light;
+                }
+            }
         }
 
         return retcolor;

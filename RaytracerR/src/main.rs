@@ -170,7 +170,7 @@ fn main() {
     //w.add_light(light3);
 
     let mat1 = Phong::new(colors::WHITE, colors::WHITE, 0.1, 0.1, 0.1, 6.0, 1.0, 0.0);
-    let mat2 = Phong::new(colors::GREEN, colors::WHITE, 0.1, 0.1, 0.1, 6.0, 0.0, 0.0);
+    let mat2 = Phong::new(colors::WHITE, colors::WHITE, 0.1, 0.1, 0.1, 6.0, 0.0, 0.8);
     //let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     let mat3 = Checkerboard::new(colors::RED, colors::YELLOW, 1.0, Vector2::new(0.5, 0.0));
 
@@ -200,7 +200,7 @@ fn main() {
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
-    c.snapshot(&mut w, "assign5render.png");
+    c.snapshot(&mut w, "assign6renderinprogress.png");
 
     //let root = KDNode::get_node(w.objects,
                                // AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)});
