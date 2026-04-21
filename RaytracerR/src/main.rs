@@ -174,7 +174,7 @@ fn main() {
     //let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     let mat3 = Checkerboard::new(colors::RED, colors::YELLOW, 1.0, Vector2::new(0.5, 0.0));
 
-    let s1 = Sphere::new_in_world(Point3::new(-3.35, 1.4, -7.0), 0.8, Box::new(mat1), &mut w);
+    let s1 = Sphere::new_in_world(Point3::new(-3.05, 1.4, -6.5), 0.8, Box::new(mat1), &mut w);
 
     let s2 = Sphere::new_in_world(Point3::new(-4.6, 2.0, -7.5), 1.0, Box::new(mat2), &mut w);
 

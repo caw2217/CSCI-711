@@ -136,7 +136,8 @@ impl Material for Phong {
 
         if depth < MAX_DEPTH {
             if self.reflectance > 0.0 {
-                let reflect_ray = Ray::new(id.point, reflect(*-id.viewing, id.normal));
+                let r_dir = reflect(*-id.viewing, id.normal);
+                let reflect_ray = Ray::new(id.point + id.normal.scale(0.0001), r_dir);
                 let rf_view = -reflect_ray.direction;
                 let rf_fh = world.spawn_ray(reflect_ray);
 
@@ -150,33 +151,33 @@ impl Material for Phong {
 
             if self.transmittance > 0.0 {
                 let i = -id.viewing;
-                let mut n_i: f32;
-                let mut n_t: f32;
-                let mut used_n: UnitVector3<f32> = id.normal;
-                if i.dot(&*id.normal) < 0.0 {
-                    used_n = -used_n;
-                    n_i = 1.0;
-                    n_t = 1.0;
-                } else {
-                    n_i = 1.0;
-                    n_t = 1.0;
-                }
-                let eta = (n_i)/(n_t);
-                let cos = (-i.dot(&*used_n)).clamp(-1.0, 1.0);
-                let sin2_t = eta * eta * (1.0 - cos * cos);
+                let mut n = id.normal;
+                let mut n_i = 1.1;
+                let mut n_t = 1.0;
 
-                let mut t_dir: UnitVector3<f32>;
-                if sin2_t > 1.0 {
-                    t_dir = reflect(*i, used_n);
+                if i.dot(&n) > 0.0 {
+                    n = -n;
+                    std::mem::swap(&mut n_i, &mut n_t);
+                }
+
+                let eta = n_i / n_t;
+                let cos_i = -i.dot(&n);
+                let sin2_t = (eta * eta * (1.0 - cos_i * cos_i)).min(1.0);
+
+
+                let trans_ray: Ray = if sin2_t > 1.0 {
+                    // total internal reflection
+                    let dir = reflect(*i, n);
+                    Ray::new(id.point + dir.scale(0.001), dir)
                 } else {
                     let cos_t = (1.0 - sin2_t).sqrt();
-
-                    t_dir = UnitVector3::new_normalize(
-                        i.scale(eta)
-                            + used_n.scale(eta * cos - cos_t)
+                    let dir = UnitVector3::new_normalize(
+                        i.scale(eta) + n.scale(eta * cos_i - cos_t)
                     );
-                }
-                let trans_ray = Ray::new(id.point + t_dir.scale(0.001), t_dir);
+
+                    Ray::new(id.point + dir.scale(0.001), dir)
+                };
+
                 let tf_view = -trans_ray.direction;
                 let tf_fh = world.spawn_ray(trans_ray);
 
