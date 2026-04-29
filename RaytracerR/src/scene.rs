@@ -25,7 +25,7 @@ pub fn sample_sphere_uniform() -> UnitVector3<f32>
     return dir;
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum Axes {
     X,
     Y,
@@ -50,69 +50,29 @@ impl Axes {
     }
 }
 
-pub struct SubdivPlane {
-    pub normal: UnitVector3<f32>,
-    pub value: f32,
-}
-
 pub struct KDNode {
-    plane: Option<SubdivPlane>,
+    axis: Axes,
+    value: f32,
     front: Option<Box<KDNode>>,
     back: Option<Box<KDNode>>,
-    objects: Vec<Rc<dyn Object>>,
+    objects: Vec<Box<dyn Object>>,
 }
 
 impl KDNode {
-    pub fn new_leaf(objs: Vec<Rc<dyn Object>>) -> KDNode {
-        KDNode {plane: None, front: None, back: None, objects: objs}
+    pub fn new_leaf(objs: Vec<Box<dyn Object>>) -> KDNode {
+        KDNode {axis: Axes::X, value: 0.0, front: None, back: None, objects: objs}
     }
 
-    pub fn new_interior(plane: SubdivPlane, front: KDNode, back: KDNode) -> KDNode {
-        KDNode {plane: Some(plane), front: Some(Box::new(front)), back: Some(Box::new(back)), objects: vec![]}
+    pub fn new_interior(axis: Axes, value: f32, front: KDNode, back: KDNode) -> KDNode {
+        KDNode {axis, value, front: Some(Box::new(front)), back: Some(Box::new(back)), objects: vec![]}
     }
 
     pub fn get_node(objs: Vec<Box<dyn Object>>, voxel: AABB) -> KDNode {
-        let shared: Vec<Rc<dyn Object>> = objs.into_iter().map(
-            |o| o.into()).collect();
-
-        return Self::get_node_inner(shared, voxel, Axes::X, 0);
-    }
-
-    fn get_node_inner(objs: Vec<Rc<dyn Object>>, voxel: AABB, axis: Axes, rec: i32) -> KDNode {
-        //for now, terminate when 1 object
-        let mut tabs: String = String::from("");
-        for _i in 0..rec {
-            tabs += "\t";
-        }
-        if ((voxel.max - voxel.min).norm() < 1.0) {
-            println!("{}LEAF KD Node: Voxel: min: {} max: {}", tabs, voxel.min, voxel.max);
-            return Self::new_leaf(objs);
-        }
-        let d = &voxel.max.coords;
-        let plane = SubdivPlane {normal: axis.get(), value: 0.5};
-        let (vback, vfront) = voxel.split(&plane);
-
-        let mut ofront: Vec<Rc<dyn Object>> = vec![];
-        let mut oback: Vec<Rc<dyn Object>> = vec![];
-
-        for obj in objs {
-            let shared:Rc<dyn Object> = obj.into();
-            if (vfront.intersect(shared.get_bounding_box())) {
-                ofront.push(Rc::clone(&shared));
-            }
-
-            if (vback.intersect(shared.get_bounding_box())) {
-                oback.push(shared);
-            }
+        if (objs.len() <= 2) {
+            return KDNode::new_leaf(objs);
         }
 
 
-
-
-
-        println!("{}KD Node: Voxel: min: {} max: {} front_size: {} back_size: {}", tabs, voxel.min, voxel.max, ofront.len(), oback.len());
-        return Self::new_interior(plane, Self::get_node_inner(ofront, vfront, axis.next(), rec + 1),
-                                  Self::get_node_inner(oback, vback, axis.next(), rec + 1));
     }
 }
 
@@ -314,47 +274,61 @@ impl World {
         }
     }
 
-    // pub fn traverse_tree(curr_node: &KDNode, ray: &Ray) -> Option<HitRecord> {
-    //     if (curr_node.back.is_none() && curr_node.front.is_none()) {
-    //         let mut first_hit: Option<HitRecord> = None;
-    //         //Check all objects for intersection, return first hit
-    //         for object in &curr_node.objects {
-    //             if let Some(hr) = object.intersect(&ray) {
-    //                 if let Some(ref first_hit_record) = first_hit {
-    //                     if hr.omega < first_hit_record.omega {
-    //                         first_hit = Some(hr);
-    //                     }
-    //                 } else {
-    //                     first_hit = Some(hr);
-    //                 }
-    //             }
-    //         }
-    //
-    //         return first_hit;
-    //     } else {
-    //
-    //     }
-    // }
+    pub fn traverse_tree<'a>(curr_node: &'a KDNode, ray: &Ray) -> Option<HitRecord<'a>> {
+        if (curr_node.back.is_none() && curr_node.front.is_none()) {
+            let mut first_hit: Option<HitRecord> = None;
+            //Check all objects for intersection, return first hit
+            for object in &curr_node.objects {
+                if let Some(hr) = object.intersect(&ray) {
+                    if let Some(ref first_hit_record) = first_hit {
+                        if hr.omega < first_hit_record.omega {
+                            first_hit = Some(hr);
+                        }
+                    } else {
+                        first_hit = Some(hr);
+                    }
+                }
+            }
+
+            return first_hit;
+        } else {
+            let plane = curr_node.plane.as_ref().unwrap();
+            let split = plane.value;
+             let (dir, origin) = match plane.axis {
+                Axes::X => {(ray.direction.x, ray.origin.x)}
+                Axes::Y => {(ray.direction.y, ray.origin.y)}
+                Axes::Z => {(ray.direction.z, ray.origin.z)}
+            };
+
+            let t_split: f32 = (split - origin)/dir;
+
+            let (near, far) = if dir >= 0.0 {
+                (curr_node.front.as_ref().unwrap(), curr_node.back.as_ref().unwrap())
+            } else {
+                (curr_node.back.as_ref().unwrap(), curr_node.front.as_ref().unwrap())
+            };
+
+            // Case 1: split plane is beyond current interval
+            if t_split > f32::INFINITY || t_split <= 0.0 {
+                return Self::traverse_tree(&*near, ray);
+            }
+
+            // Case 2: split plane is before interval
+            if t_split < 0.0 {
+                return Self::traverse_tree(&*far, ray,);
+            }
+
+            // Case 3: we must check both
+            if let Some(hit) = Self::traverse_tree(&*near, ray) {
+                return Some(hit); // early exit (TA-B optimization)
+            }
+
+            return Self::traverse_tree(&*far, ray);
+        }
+    }
 
     //Spawn a ray and return a hitrecord for the first intersection, if it exists
     pub fn spawn_ray(&self, ray: Ray) -> Option<HitRecord> {
-        let mut first_hit: Option<HitRecord> = None;
-
-
-
-        //Check all objects for intersection, return first hit
-        for object in &self.objects {
-            if let Some(hr) = object.intersect(&ray) {
-                if let Some(ref first_hit_record) = first_hit {
-                    if hr.omega < first_hit_record.omega {
-                        first_hit = Some(hr);
-                    }
-                } else {
-                    first_hit = Some(hr);
-                }
-            }
-        }
-
-        return first_hit;
+        return Self::traverse_tree(&self.kdtree, &ray);
     }
 }

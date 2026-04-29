@@ -200,6 +200,8 @@ fn main() {
     t2.rotate(-1.0f32.to_radians(), 0.0, 0.0);
     w.add(t2);
 
+    w.build_kdtree();
+
     c.snapshot(&mut w, "assign6renderinprogress.png");
 
     //let root = KDNode::get_node(w.objects,

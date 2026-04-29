@@ -1,7 +1,8 @@
+use std::fmt::{Debug, Formatter};
 use na::{Point3, Similarity3, Translation3, UnitQuaternion, UnitVector3};
 use crate::lighting::{IntersectData, Material};
 use crate::{HitRecord, Ray, World};
-use crate::scene::SubdivPlane;
+use crate::scene::{Axes};
 
 #[derive(Clone)]
 pub struct AABB {
@@ -10,20 +11,35 @@ pub struct AABB {
 }
 
 impl AABB {
-    pub fn split(&self, plane: &SubdivPlane) -> (Self, Self) {
-        let dist = (plane.normal.dot(&self.max.coords) - plane.normal.dot(&self.min.coords)).abs();
-        let back_offset = *plane.normal * (dist * (1.0 - plane.value));
-        let front_offset = *plane.normal * dist * plane.value;
-        let back_max = self.max - back_offset;
-        let front_min = self.min + front_offset;
+    pub fn split(&self, axis: Axes, value: f32) -> (Self, Self) {
+        let mut left_max = self.max;
+        let mut right_min = self.min;
+        match axis {
+            Axes::X => {
+                left_max.x = value;
+                right_min.x = value;
+            }
+            Axes::Y => {
+                left_max.y = value;
+                right_min.y = value;
+            }
+            Axes::Z => {
+                left_max.z = value;
+                right_min.z = value;
+            }
+        }
 
-        let back = AABB {min: self.min, max: back_max};
-        let front = AABB {min: front_min, max: self.max};
+        let left = AABB {min: self.min, max: left_max};
+        let right = AABB {min: right_min, max: self.max};
 
-        return (back, front);
+        return (left, right);
     }
 
     pub fn intersect(&self, other: &AABB) -> bool {
+        //dbg!(self.min);
+        //dbg!(self.max);
+        //dbg!(other.min);
+        //dbg!(other.max);
         if self.min.x > other.max.x || other.min.x > self.max.x {
             return false;
         }
@@ -65,6 +81,8 @@ pub trait Object {
     }
     fn apply_model(&mut self);
     fn intersect(&self, ray: &Ray) -> Option<HitRecord>;
+
+    fn str(&self) -> String;
 }
 
 #[derive(Clone)]
@@ -160,6 +178,10 @@ impl Object for Sphere {
         let point = ray.origin + ray.direction.scale(omega);
         let normal = UnitVector3::new_normalize(point - self.center);
         return Some(HitRecord::new(self, ray, omega, self.material.is_vol(), normal, point));
+    }
+
+    fn str(&self) -> String {
+        return format!("Sphere: ({}, {}, {}), radius = {}", self.center.x, self.center.y, self.center.z, self.radius);
     }
 }
 
@@ -276,5 +298,9 @@ impl Object for Triangle {
 
     fn get_bounding_box(&self) -> &AABB {
         return &self.bbox;
+    }
+
+    fn str(&self) -> String {
+        return format!("Triangle: {}, {}, {}", self.vertices[0], self.vertices[1], self.vertices[2]);
     }
 }
