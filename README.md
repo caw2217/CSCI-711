@@ -4,18 +4,18 @@ This is a repository that holds all the code and renders from my rust raytracer.
 ## Checkpoint 1
 ![](Renders/check1/check1rend.png)
 ## Checkpoint 2
-![](Renders/check1/check2rend.png)
-![](Renders/check1/check2rendmoved.png)
+![](Renders/check2/check2rend.png)
+![](Renders/check2/check2rendmoved.png)
 ## Checkpoint 3
-![](Renders/check1/check3rend.png)
-![](Renders/check1/check3rend3lights.png)
+![](Renders/check3/check3rend.png)
+![](Renders/check3/check3rend3lights.png)
 ## Checkpoint 4
-![](Renders/check1/check4rend.png)
+![](Renders/check4/check4rend.png)
 ## Checkpoint 5
-![](Renders/check1/check5rend.png)
+![](Renders/check5/check5rend.png)
 ## Checkpoint 6
-![](Renders/check1/check6rend.png)
+![](Renders/check6/check6rend.png)
 ## Checkpoint 7
 ## Advanced Checkpoint: K-D Tree
-![](advKDTree/kdtreebunny.png)
+![](Renders/advKDTree/kdtreebunny.png)
 ## Advanced Checkpoint: Advanced Tone Mapping
