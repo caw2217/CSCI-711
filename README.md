@@ -23,19 +23,19 @@ This is a repository that holds all the code and renders from my rust raytracer.
 
 ## Checkpoint 7
 ### Ward
-Low-range lighting
+#### Low-range lighting
 ![](Renders/check7/check7rendwardlo.png)
-Mid-range lighting
+#### Mid-range lighting
 ![](Renders/check7/check7rendwardmid.png)
-High-range lighting
+#### High-range lighting
 ![](Renders/check7/check7rendwardhi.png)
 
 ### Reinhard
-Low-range lighting
+#### Low-range lighting
 ![](Renders/check7/check7rendreinlo.png)
-Mid-range lighting
+#### Mid-range lighting
 ![](Renders/check7/check7rendreinmid.png)
-High-range lighting
+#### High-range lighting
 ![](Renders/check7/check7rendreinhi.png)
 
 ## Advanced Checkpoint: K-D Tree
