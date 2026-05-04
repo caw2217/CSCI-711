@@ -139,14 +139,10 @@ impl Material for Phong {
                 let r_dir = reflect(*-id.viewing, id.normal);
                 let reflect_ray = Ray::new(id.point + id.normal.scale(0.0001), r_dir);
                 let rf_view = -reflect_ray.direction;
-                let rf_fh = world.spawn_ray(reflect_ray);
+                let rf_color = world.spawn_vol_light_ray(reflect_ray);
+                let rf_rad = Vector3::new(rf_color[0], rf_color[1], rf_color[2]);
 
-                if let Some(rf_hr) = rf_fh {
-                    let rf_id = IntersectData::new(&rf_hr, -rf_view, &id.lights);
-                    retcolor += self.reflectance * rf_hr.object.get_material().illuminate(rf_id, &world, depth + 1);
-                } else {
-                    retcolor += self.reflectance * &world.ambient_light;
-                }
+                retcolor += self.transmittance * rf_rad;
             }
 
             if self.transmittance > 0.0 {
@@ -179,14 +175,10 @@ impl Material for Phong {
                 };
 
                 let tf_view = -trans_ray.direction;
-                let tf_fh = world.spawn_ray(trans_ray);
+                let tf_color = world.spawn_vol_light_ray(trans_ray);
+                let tf_rad = Vector3::new(tf_color[0], tf_color[1], tf_color[2]);
 
-                if let Some(tf_hr) = tf_fh {
-                    let tf_id = IntersectData::new(&tf_hr, -tf_view, &id.lights);
-                    retcolor += self.transmittance * tf_hr.object.get_material().illuminate(tf_id, &world, depth + 1);
-                } else {
-                    retcolor += self.transmittance * &world.ambient_light;
-                }
+                retcolor += self.transmittance * tf_rad;
             }
         }
 

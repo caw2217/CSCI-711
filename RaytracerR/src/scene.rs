@@ -1,5 +1,5 @@
 use std::f32::consts::{E, PI};
-use std::mem;
+use std::{fmt, mem};
 use std::rc::Rc;
 use std::thread::current;
 use image::Rgb;
@@ -26,6 +26,7 @@ pub fn sample_sphere_uniform() -> UnitVector3<f32>
 }
 
 #[derive(PartialEq, Copy, Clone)]
+#[derive(Debug)]
 pub enum Axes {
     X,
     Y,
@@ -55,24 +56,52 @@ pub struct KDNode {
     value: f32,
     front: Option<Box<KDNode>>,
     back: Option<Box<KDNode>>,
-    objects: Vec<Box<dyn Object>>,
+    object_indices : Vec<usize>,
+    voxel: AABB
 }
 
-impl KDNode {
-    pub fn new_leaf(objs: Vec<Box<dyn Object>>) -> KDNode {
-        KDNode {axis: Axes::X, value: 0.0, front: None, back: None, objects: objs}
+impl fmt::Debug for KDNode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("KDNode").field("axis", &self.axis).field("value", &self.value).finish()
+    }
+}
+
+impl KDNode{
+    pub fn new_leaf(indices: Vec<usize>, voxel: AABB) -> KDNode {
+        KDNode {axis: Axes::X, value: 0.0, front: None, back: None, object_indices: indices, voxel }
     }
 
-    pub fn new_interior(axis: Axes, value: f32, front: KDNode, back: KDNode) -> KDNode {
-        KDNode {axis, value, front: Some(Box::new(front)), back: Some(Box::new(back)), objects: vec![]}
+    pub fn new_interior(axis: Axes, value: f32, front: KDNode, back: KDNode, voxel: AABB) -> KDNode {
+        KDNode {axis, value, front: Some(Box::new(front)), back: Some(Box::new(back)), object_indices: vec![], voxel}
     }
 
-    pub fn get_node(objs: Vec<Box<dyn Object>>, voxel: AABB) -> KDNode {
-        if (objs.len() <= 2) {
-            return KDNode::new_leaf(objs);
+    pub fn get_node(world: &World, indices: Vec<usize>, voxel: AABB, curr_axis: Axes, depth: usize) -> KDNode {
+
+        if (indices.len() <= 2 || depth > 32) {
+            return KDNode::new_leaf(indices, voxel);
         }
 
+        let split = 0.5;
+        let value = match curr_axis {
+            Axes::X => {((voxel.max.x - voxel.min.x) * split) + voxel.min.x},
+            Axes::Y => {((voxel.max.y - voxel.min.y) * split) + voxel.min.y},
+            Axes::Z => {((voxel.max.z - voxel.min.z) * split) + voxel.min.z},
+        };
+        let (left, right) = voxel.split(curr_axis, value);
 
+        let mut objs_left: Vec<usize> = vec![];
+        let mut objs_right: Vec<usize> = vec![];
+        for i in indices  {
+            let obj = &world.objects[i];
+            if (obj.get_bounding_box().intersect(&left)) {
+                objs_left.push(i);
+            }
+            if (obj.get_bounding_box().intersect(&right)) {
+                objs_right.push(i);
+            }
+        }
+
+        return Self::new_interior(curr_axis, value, Self::get_node(world, objs_left, left, curr_axis.next(), depth+1), Self::get_node(world, objs_right, right, curr_axis.next(), depth+1), voxel)
     }
 }
 
@@ -85,7 +114,7 @@ pub struct World {
 
 impl World {
     pub fn new(ambient_light: Vector3<f32>) -> World {
-        let kdtree = KDNode::new_leaf(vec![]);
+        let kdtree = KDNode::new_leaf(vec![], AABB { min: Point3::origin(), max: Point3::origin() });
         return World { objects: vec![], lights: vec![], ambient_light, kdtree};
     }
 
@@ -107,8 +136,20 @@ impl World {
     }
 
     pub fn build_kdtree(&mut self) {
-        let objects = mem::take(&mut self.objects);
-        self.kdtree = KDNode::get_node(objects, AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)})
+        let indices: Vec<usize> = (0..self.objects.len()).collect();
+
+        let mut objs_min: Point3<f32> = self.objects[0].get_bounding_box().min;
+        let mut objs_max: Point3<f32> = self.objects[0].get_bounding_box().max;
+
+         for object in &self.objects {
+             let min = object.get_bounding_box().min;
+             let max = object.get_bounding_box().max;
+
+             objs_min = objs_min.inf(&min);
+             objs_max = objs_max.inf(&max);
+         }
+
+        self.kdtree = KDNode::get_node(&self, indices, AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)}, Axes::X, 1);
     }
 
     //Spawn a ray and return irradiance
@@ -127,26 +168,27 @@ impl World {
         //Transmission (homogenous medium for now)
         //rough extinction coeff of air, in m^-1
         //for now assume we start and end in medium
-        let scatter_coeff: Vector3<f32> = Vector3::new(0.5, 0.5, 0.5);
-        let absorption_coeff: Vector3<f32> = Vector3::new(0.001, 0.001, 0.001);
+        let scatter_coeff: Vector3<f32> = Vector3::new(0.3, 0.3, 0.3);
+        let absorption_coeff: Vector3<f32> = Vector3::new(0.05, 0.05, 0.05);
         let extinction_coeff: Vector3<f32> = scatter_coeff + absorption_coeff;
         let optical_depth: Vector3<f32> = extinction_coeff.scale(max_dist);
         let transmittance: Vector3<f32> = Vector3::new(E.powf(-optical_depth.x), E.powf(-optical_depth.y), E.powf(-optical_depth.z));
 
         //In scatter
-        let step: f32 = 0.5;
+        let step: f32 = 0.1;
         let mut t: f32 = random_range(0.0..step);
 
         let mut in_transmittance: Vector3<f32> = Vector3::new(1.0, 1.0, 1.0);
         //for now, isotropic phase function
-        let phase = 1.0 / (4.0 * PI);
+        //let phase = 1.0 / (4.0 * PI);
+        let g = 0.6;
         let mut in_scatter= Vector3::zeros();
         let mut emitted: Vector3<f32> = Vector3::zeros();
+        let att = (-extinction_coeff * step).map(|x| x.exp());
 
         while t < max_dist {
             let curr_point = origin + dir.scale(t);
             //calculate transmittance change
-            let att = (-extinction_coeff * step).map(|x| x.exp());
             in_transmittance = in_transmittance.component_mul(&att);
 
             //scatter coeff
@@ -161,6 +203,11 @@ impl World {
                 let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
                 let dir_to_light = UnitVector3::new_normalize(light.position - curr_point);
 
+                let cos_theta = dir_to_light.dot(&-dir);
+                let denom = 1.0 + g * g - 2.0 * g * cos_theta;
+                let phase = (1.0 / (4.0 * PI)) * ((1.0 - g*g) / denom.powf(1.5));
+
+
                 let shadow_ray = Ray::new(curr_point + dir_to_light.scale(0.01), dir_to_light);
 
                 let mut v: f32 = 1.0;
@@ -170,16 +217,23 @@ impl World {
                         v = 0.0;
                     }
                 }
+
                 //not sure if i need visibility, phong is calculating shadows
-                let h: f32 = 1.0/(curr_point - light.position).magnitude_squared();
+                //let h: f32 = 1.0/(curr_point - light.position).magnitude_squared();
+                let h: f32 = 1.0;
 
                 ls += (light_power * phase * h * v).component_mul(&trans_between_light);
             }
 
-            ls += self.ambient_light;
+            let env_dir = -dir;
+            let cos_theta = env_dir.dot(&-dir);
+            let denom = 1.0 + g*g - 2.0*g*cos_theta;
+            let phase_env = (1.0 / (4.0 * PI)) * ((1.0 - g*g) / denom.powf(1.5));
+
+            ls += self.ambient_light * phase_env * 0.05;
 
             //multi scattering
-            let N = 8;
+            let N = 0;
             let mut lm: Vector3<f32> = Vector3::zeros();
             for i in 0..N {
                 let random_w = sample_sphere_uniform();
@@ -203,6 +257,7 @@ impl World {
                 //scatter
 
                 let mut li = Vector3::zeros();
+                let mut mul_phase: f32 = 0.0;
                 for light in &self.lights {
                     let light_power = &light.intensity;
                     let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&next_point, &light.position));
@@ -214,24 +269,33 @@ impl World {
 
                     let mut v: f32 = 1.0;
 
+                    let cos_theta = dir_to_light.dot(&-dir);
+                    let denom = 1.0 + g * g - 2.0 * g * cos_theta;
+                    mul_phase = (1.0 / (4.0 * PI)) * ((1.0 - g*g) / denom.powf(1.5));
+
+
                     if let Some(sh) = self.spawn_ray(shadow_ray) {
                         if sh.omega < distance(&light.position, &curr_point) {
                             v = 0.0;
+                        } else {
+                            v = 5.0;
                         }
+                    } else {
+                        v = 5.0;
                     }
 
-                    li += (light_power * phase * h * v).component_mul(&trans_between_light);
+                    li += (light_power * mul_phase * h * v).component_mul(&trans_between_light);
                 }
 
                 //for now skip v
                 let prob_r = extinction_coeff[0] * (-extinction_coeff[0] * random_r).exp();
                 let prob_w = 1.0/(4.0 * PI);
-                lm += (tr * phase).component_mul(&scatter_coeff).component_mul(&li).scale(1.0/(prob_w * prob_r));
+                lm += (tr * mul_phase).component_mul(&scatter_coeff).component_mul(&li).scale(1.0/(prob_w * prob_r));
             }
 
-            emitted += in_transmittance.component_mul(&absorption_coeff).component_mul(&Vector3::new(0.1, 0.1, 0.1)) * step;
+            emitted += in_transmittance.component_mul(&absorption_coeff).component_mul(&Vector3::zeros()) * step;
 
-            in_scatter += in_transmittance.component_mul(&scatter_coeff).component_mul(&(ls + lm)) * step;
+            in_scatter += in_transmittance.component_mul(&scatter_coeff).component_mul(&(ls + lm)) * step * 5.0;
 
             t += step;
         }
@@ -241,7 +305,7 @@ impl World {
         if let Some(hr) = &first_hit {
             let material = hr.object.get_material();
             let id = IntersectData::new(&hr, viewing, &self.lights);
-            let id_cpy = IntersectData::new(&hr, viewing, &self.lights);
+            // id_cpy = IntersectData::new(&hr, viewing, &self.lights);
 
             //Surface radiance
             let rad_vec = material.illuminate(id, &self, 1);
@@ -274,61 +338,76 @@ impl World {
         }
     }
 
-    pub fn traverse_tree<'a>(curr_node: &'a KDNode, ray: &Ray) -> Option<HitRecord<'a>> {
-        if (curr_node.back.is_none() && curr_node.front.is_none()) {
-            let mut first_hit: Option<HitRecord> = None;
-            //Check all objects for intersection, return first hit
-            for object in &curr_node.objects {
-                if let Some(hr) = object.intersect(&ray) {
-                    if let Some(ref first_hit_record) = first_hit {
-                        if hr.omega < first_hit_record.omega {
-                            first_hit = Some(hr);
+    pub fn traverse_tree<'a>(&'a self, node: &'a KDNode, ray: &Ray, tmin: f32, tmax: f32) -> Option<HitRecord<'a>> {
+        if node.front.is_none() && node.back.is_none() {
+            let mut best: Option<HitRecord> = None;
+
+            for i in &node.object_indices {
+                let obj = &self.objects[*i];
+
+                if let Some(hit) = obj.intersect(ray) {
+                    if hit.omega >= tmin && hit.omega <= tmax {
+                        if best.as_ref().map_or(true, |b| hit.omega < b.omega) {
+                            best = Some(hit);
                         }
-                    } else {
-                        first_hit = Some(hr);
                     }
                 }
             }
 
-            return first_hit;
-        } else {
-            let plane = curr_node.plane.as_ref().unwrap();
-            let split = plane.value;
-             let (dir, origin) = match plane.axis {
-                Axes::X => {(ray.direction.x, ray.origin.x)}
-                Axes::Y => {(ray.direction.y, ray.origin.y)}
-                Axes::Z => {(ray.direction.z, ray.origin.z)}
-            };
-
-            let t_split: f32 = (split - origin)/dir;
-
-            let (near, far) = if dir >= 0.0 {
-                (curr_node.front.as_ref().unwrap(), curr_node.back.as_ref().unwrap())
-            } else {
-                (curr_node.back.as_ref().unwrap(), curr_node.front.as_ref().unwrap())
-            };
-
-            // Case 1: split plane is beyond current interval
-            if t_split > f32::INFINITY || t_split <= 0.0 {
-                return Self::traverse_tree(&*near, ray);
-            }
-
-            // Case 2: split plane is before interval
-            if t_split < 0.0 {
-                return Self::traverse_tree(&*far, ray,);
-            }
-
-            // Case 3: we must check both
-            if let Some(hit) = Self::traverse_tree(&*near, ray) {
-                return Some(hit); // early exit (TA-B optimization)
-            }
-
-            return Self::traverse_tree(&*far, ray);
+            return best;
         }
+
+        let axis_val = match node.axis {
+            Axes::X => ray.origin.x,
+            Axes::Y => ray.origin.y,
+            Axes::Z => ray.origin.z,
+        };
+
+        let dir_val = match node.axis {
+            Axes::X => ray.direction.x,
+            Axes::Y => ray.direction.y,
+            Axes::Z => ray.direction.z,
+        };
+
+        if dir_val.abs() < 1e-8 {
+            // ray parallel → choose one side
+            let child = if axis_val <= node.value {
+                node.front.as_ref().unwrap()
+            } else {
+                node.back.as_ref().unwrap()
+            };
+
+            return self.traverse_tree(child, ray, tmin, tmax);
+        }
+
+        let t_split = (node.value - axis_val) / dir_val;
+
+        let (near, far) = if dir_val >= 0.0 {
+            (&node.front, &node.back)
+        } else {
+            (&node.back, &node.front)
+        };
+
+        let near = near.as_ref().unwrap();
+        let far = far.as_ref().unwrap();
+
+        if t_split >= tmax {
+            return self.traverse_tree(near, ray, tmin, tmax);
+        }
+
+        if t_split <= tmin {
+            return self.traverse_tree(far, ray, tmin, tmax);
+        }
+
+        if let Some(hit) = self.traverse_tree(near, ray, tmin, t_split) {
+            return Some(hit);
+        }
+
+        self.traverse_tree(far, ray, t_split, tmax)
     }
 
     //Spawn a ray and return a hitrecord for the first intersection, if it exists
     pub fn spawn_ray(&self, ray: Ray) -> Option<HitRecord> {
-        return Self::traverse_tree(&self.kdtree, &ray);
+        return self.traverse_tree(&self.kdtree, &ray, 0.0, f32::INFINITY);
     }
 }
