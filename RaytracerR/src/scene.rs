@@ -8,7 +8,7 @@ use rand::{random, random_range, rng};
 use rand::distr::Distribution;
 use rand_distr::{UnitSphere, Exp};
 use rand_distr::num_traits::abs;
-use crate::{Camera, HitRecord, Ray, MAX_IRRADIANCE};
+use crate::{Camera, HitRecord, Ray};
 use crate::lighting::{IntersectData, Light, Phong};
 use crate::primitives::{Object, Sphere, AABB};
 
@@ -108,7 +108,7 @@ impl KDNode{
 pub struct World {
     pub objects: Vec<Box<dyn Object>>,
     pub kdtree: KDNode,
-    lights: Vec<Light>,
+    pub lights: Vec<Light>,
     pub ambient_light: Vector3<f32>,
 }
 
@@ -313,7 +313,7 @@ impl World {
             total += reduced_surface_radiance;
         }
 
-        let rad_color = Rgb([total.x.min(MAX_IRRADIANCE), total.y.min(MAX_IRRADIANCE), total.z.min(MAX_IRRADIANCE)]);
+        let rad_color = Rgb([total.x, total.y, total.z]);
 
         return rad_color;
     }
@@ -327,14 +327,14 @@ impl World {
             let id = IntersectData::new(&hr, viewing, &self.lights);
 
             let rad_vec = material.illuminate(id, &self, 1);
-            let rad_color = Rgb([rad_vec.x.min(MAX_IRRADIANCE), rad_vec.y.min(MAX_IRRADIANCE), rad_vec.z.min(MAX_IRRADIANCE)]);
+            let rad_color = Rgb([rad_vec.x, rad_vec.y, rad_vec.z]);
 
             return rad_color;
         } else {
             return Rgb([
-                self.ambient_light.x.min(MAX_IRRADIANCE),
-                self.ambient_light.y.min(MAX_IRRADIANCE),
-                self.ambient_light.z.min(MAX_IRRADIANCE)]);
+                self.ambient_light.x,
+                self.ambient_light.y,
+                self.ambient_light.z]);
         }
     }
 
