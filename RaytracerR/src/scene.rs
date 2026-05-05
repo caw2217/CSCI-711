@@ -149,7 +149,7 @@ impl World {
              objs_max = objs_max.inf(&max);
          }
 
-        self.kdtree = KDNode::get_node(&self, indices, AABB{min: Point3::new(-100.0, -100.0, -100.0), max: Point3::new(100.0,100.0, 100.0)}, Axes::X, 1);
+        self.kdtree = KDNode::get_node(&self, indices, AABB{min: Point3::new(-50.0, -50.0, -50.0), max: Point3::new(50.0,50.0, 50.0)}, Axes::X, 1);
     }
 
     //Spawn a ray and return irradiance

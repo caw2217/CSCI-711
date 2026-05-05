@@ -15,6 +15,7 @@ use image::buffer::ConvertBuffer;
 use image::{ImageBuffer, Rgb, Rgb32FImage, RgbImage};
 use na::{Point3, Rotation3, Similarity3, Translation3, UnitQuaternion, UnitVector3, Vector2, Vector3};
 use std::fmt::Debug;
+use rand_distr::num_traits::Pow;
 
 pub fn reflect(direction: Vector3<f32>, normal: UnitVector3<f32>) -> UnitVector3<f32> {
     return UnitVector3::new_normalize(direction - 2.0 * *normal * (direction.dot(&normal)));
@@ -86,6 +87,27 @@ pub fn log_avg_lum(fp_buffer: &Rgb32FImage) -> f32 {
     return (sum / n as f32).exp()
 }
 
+pub fn overall_lum(fp_buffer: &Rgb32FImage) -> f32 {
+    let mut sum = 0.0f32;
+    let mut n = 0;
+    for (x, y, pixel) in fp_buffer.enumerate_pixels() {
+        sum += (1e-4 + abs_ilum(pixel)).ln();
+        n += 1;
+    }
+    return (sum / n as f32).exp()
+}
+
+pub fn max_scene_lum(fp_buffer: &Rgb32FImage) -> f32 {
+    let mut max = 0.0f32;
+    for (x, y, pixel) in fp_buffer.enumerate_pixels() {
+        let lum = abs_ilum(pixel);
+        if lum > max {
+            max = lum;
+        }
+    }
+    return max;
+}
+
 pub fn ward_sf(l_dmax: f32, l_wa: f32) -> f32 {
     return ((1.219 + (l_dmax/2.0).powf(0.4))/(1.219+l_wa.powf(0.4))).powf(2.5);
 }
@@ -105,6 +127,19 @@ pub fn rein_tr(pixel: &Rgb<f32>, key: f32, a: f32, max_lum: f32) -> Rgb<f32> {
     let br = bs/(1.0 + bs);
 
     return Rgb([rr * max_lum, gr * max_lum, br * max_lum]);
+}
+
+pub fn adaptive_log_tr(pixel: &Rgb<f32>, lwmax: f32, lwa: f32, bias: f32, max_lum: f32) -> Rgb<f32> {
+    let lw_scaled = abs_ilum(pixel)/lwa;
+    let lwmax_scaled = lwmax/lwa;
+
+    let ld = 1.0/(lwmax_scaled + 1.0).log10() + (lw_scaled + 1.0).ln()/(2.0+((lw_scaled/lwmax_scaled).powf(bias.ln()/0.5f32.ln())) * 8.0).ln();
+
+    let rd = ld * pixel[0];
+    let gd = ld * pixel[1];
+    let bd = ld * pixel[2];
+
+    return Rgb([rd, gd, bd]);
 }
 
 impl Camera {
@@ -144,9 +179,9 @@ impl Camera {
         self.recalculate_view();
     }
 
-    pub fn snapshot(&mut self, world: &mut World, filename: &str) {
+    pub fn snapshot(&mut self, world: &mut World, filename: &str, vol: bool) {
         if (!self.init_world) {
-            world.convert_all_objects(&self);
+            //world.convert_all_objects(&self);
 
             world.build_kdtree();
             self.init_world = true;
@@ -167,11 +202,15 @@ impl Camera {
         let z = self.focal_length;
         for i in 0..self.img_height {
             for j in 0..self.img_width {
-                let origin = Point3::origin();
+                //let origin = Point3::origin();
                 //println!("{}", origin);
-                let dir = Vector3::new(x, y, z).normalize();
-                let r = Ray::new(origin, UnitVector3::new_normalize(dir));
-                fp_buffer.put_pixel(j, i, world.spawn_light_ray(r));
+                let dir = self.view * Vector3::new(x, y, z).normalize();
+                let r = Ray::new(self.position, UnitVector3::new_normalize(dir));
+                if (vol) {
+                    fp_buffer.put_pixel(j, i, world.spawn_vol_light_ray(r));
+                } else {
+                    fp_buffer.put_pixel(j, i, world.spawn_light_ray(r));
+                }
                 x += pw;
             }
 
@@ -182,6 +221,7 @@ impl Camera {
         let log_avg = log_avg_lum(&fp_buffer);
 
         let sf = ward_sf(self.max_illuminance, log_avg);
+        let lwmax = max_scene_lum(&fp_buffer);
 
         //Tone Reproduction
         for (x, y, pixel) in fp_buffer.enumerate_pixels_mut() {
@@ -191,10 +231,13 @@ impl Camera {
             //let abs_il = abs_ilum(pixel);
 
             //Step 3: Compression
-            //pixel_target = ward_tr(pixel, sf); //Perceptual: Ward's
+            pixel_target = ward_tr(pixel, sf); //Perceptual: Ward's
 
-            pixel_target = rein_tr(pixel, log_avg, 0.18, self.max_illuminance); //Photographic: Reinhard
+            //pixel_target = rein_tr(pixel, log_avg, 0.18, self.max_illuminance); //Photographic: Reinhard
 
+            //pixel_target = adaptive_log_tr(pixel, lwmax, log_avg, 0.85, self.max_illuminance);
+
+            //Step 4
             pixel_new[0] = ((pixel_target[0]/self.max_illuminance) * 255.0) as u8;
             pixel_new[1] = ((pixel_target[1]/self.max_illuminance) * 255.0) as u8;
             pixel_new[2] = ((pixel_target[2]/self.max_illuminance) * 255.0) as u8;
@@ -212,11 +255,15 @@ impl Camera {
 //Objects/Camera must be transformed before adding to the world
 //The world will convert all its objects to camera space
 fn main() {
-    let mut c: Camera = Camera::new(Point3::new(-4.5, 1.6, -10.0), Vector3::z_axis(), Vector3::y_axis(), 5.0, 45.0, 480, 640, 100.0);
+    let cpos = Point3::new(-6.5, 1.6, -7.5);
+    let holepos = Point3::new(7.0, 1.6, -9.5);
+
+    let dir = UnitVector3::new_normalize(cpos - holepos);
+
+    let mut c: Camera = Camera::new(Point3::new(-6.5, 1.6, -4.5), dir, Vector3::y_axis(), 5.0, 45.0, 480, 640, 100.0);
     //c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
     //c.set_pos(-3.5, 10.0, -10.0);
-    //let light1: Light = Light::new(Point3::new(-3.05, 1.4, -5.5), Vector3::new(300.0, 300.0, 300.0));
-    let mut light1: Light = Light::new(Point3::new(0.0, 40.0, -40.0), Vector3::new(10.0, 10.0, 10.0));
+    let mut light1: Light = Light::new(Point3::new(0.0, 2.0, -5.5), Vector3::new(10.0, 10.0, 10.0));
     //let light2: Light = Light::new(Point3::new(10.0, 40.0, -40.0), Vector3::new(0.0, 0.0, 5.0));
     //let light3: Light = Light::new(Point3::new(-10.0, 30.0, -60.0), Vector3::new(0.0, 5.0, 0.0));
     let mut w: World = World::new(colors::SKY_BLUE.scale(50.0));
@@ -229,11 +276,11 @@ fn main() {
     let mat2 = Phong::new(colors::WHITE, colors::WHITE, 0.1, 0.1, 0.1, 6.0, 0.0, 0.8);
     //let mat3 = Phong::new(colors::YELLOW, colors::WHITE, 0.1, 0.1, 0.1, 6.0);
     let mat3 = Checkerboard::new(colors::RED, colors::YELLOW, 1.0, Vector2::new(0.5, 0.0));
-    //let mat4 = Phong::new(colors::WHITE, colors::GREY, 0.1, 0.1, 0.1, 6.0, 0.0, 0.0);
+    let mat4 = Phong::new(colors::WHITE, colors::GREY, 0.1, 0.1, 0.1, 6.0, 0.0, 0.0);
 
-    let s1 = Sphere::new_in_world(Point3::new(-3.05, 1.4, -6.5), 0.8, Box::new(mat1), &mut w);
+    //let s1 = Sphere::new_in_world(Point3::new(-3.05, 1.4, -6.5), 0.8, Box::new(mat1), &mut w);
 
-    let s2 = Sphere::new_in_world(Point3::new(-4.6, 2.0, -7.5), 1.0, Box::new(mat2), &mut w);
+    //let s2 = Sphere::new_in_world(Point3::new(-4.6, 2.0, -7.5), 1.0, Box::new(mat4), &mut w);
 
     let mut t1 = Triangle::new(
         Point3::new(-7.0, 0.0, 20.0),
@@ -251,103 +298,103 @@ fn main() {
         Similarity3::identity());
     w.add(t2);
 
-    // let mut t1 = Triangle::new(
-    //     Point3::new(-7.0, 5.0, 20.0),
-    //     Point3::new(-7.0, 5.0, -20.0),
-    //     Point3::new(7.0, 5.0, 20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t1);
-    //
-    // let mut t2 = Triangle::new(
-    //     Point3::new(7.0, 5.0, -20.0),
-    //     Point3::new(7.0, 5.0, 20.0),
-    //     Point3::new(-7.0,5.0, -20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t2);
-    //
-    //
-    // let mut t3 = Triangle::new(
-    //     Point3::new(-7.0, 0.0, 20.0),
-    //     Point3::new(-7.0, 0.0, -20.0),
-    //     Point3::new(-7.0, 5.0, 20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t3);
-    //
-    // let mut t4 = Triangle::new(
-    //     Point3::new(-7.0, 5.0, -20.0),
-    //     Point3::new(-7.0, 5.0, 20.0),
-    //     Point3::new(-7.0, 0.0, -20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t4);
-    //
-    // let mut t5 = Triangle::new(
-    //     Point3::new(-2.0, 0.0, 20.0),
-    //     Point3::new(-2.0, 0.9, 20.0),
-    //     Point3::new(-2.0, 0.0, -20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t5);
-    //
-    // let mut t6 = Triangle::new(
-    //     Point3::new(-2.0, 0.9, -20.0),
-    //     Point3::new(-2.0, 0.0, -20.0),
-    //     Point3::new(-2.0, 0.9, 20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t6);
-    //
-    //
-    // let mut t6 = Triangle::new(
-    //     Point3::new(-2.0, 1.9, 20.0),
-    //     Point3::new(-2.0, 5.0, 20.0),
-    //     Point3::new(-2.0, 1.9, -20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t6);
-    //
-    // let mut t7 = Triangle::new(
-    //     Point3::new(-2.0, 5.0, -20.0),
-    //     Point3::new(-2.0, 1.9, -20.0),
-    //     Point3::new(-2.0, 5.0, 20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t7);
-    //
-    // let mut t8 = Triangle::new(
-    //     Point3::new(-2.0, 0.9, 20.0),
-    //     Point3::new(-2.0, 1.9, 20.0),
-    //     Point3::new(-2.0, 0.9, -4.5),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t8);
-    //
-    // let mut t9 = Triangle::new(
-    //     Point3::new(-2.0, 1.9, -4.5),
-    //     Point3::new(-2.0, 0.9, -4.5),
-    //     Point3::new(-2.0, 1.9, 20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t9);
-    //
-    // let mut t10 = Triangle::new(
-    //     Point3::new(-2.0, 0.9, -6.5),
-    //     Point3::new(-2.0, 1.9, -6.5),
-    //     Point3::new(-2.0, 0.9, -20.0),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t10);
-    //
-    // let mut t11 = Triangle::new(
-    //     Point3::new(-2.0, 1.9, -20.0),
-    //     Point3::new(-2.0, 0.9, -20.0),
-    //     Point3::new(-2.0, 1.9, -6.5),
-    //     Box::new(mat4),
-    //     Similarity3::identity());
-    // w.add(t11);
+    let mut t1 = Triangle::new(
+        Point3::new(-7.0, 5.0, 20.0),
+        Point3::new(-7.0, 5.0, -20.0),
+        Point3::new(7.0, 5.0, 20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t1);
+
+    let mut t2 = Triangle::new(
+        Point3::new(7.0, 5.0, -20.0),
+        Point3::new(7.0, 5.0, 20.0),
+        Point3::new(-7.0,5.0, -20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t2);
+
+
+    let mut t3 = Triangle::new(
+        Point3::new(-7.0, 0.0, 20.0),
+        Point3::new(-7.0, 0.0, -20.0),
+        Point3::new(-7.0, 5.0, 20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t3);
+
+    let mut t4 = Triangle::new(
+        Point3::new(-7.0, 5.0, -20.0),
+        Point3::new(-7.0, 5.0, 20.0),
+        Point3::new(-7.0, 0.0, -20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t4);
+
+    let mut t5 = Triangle::new(
+        Point3::new(-2.0, 0.0, 20.0),
+        Point3::new(-2.0, 0.9, 20.0),
+        Point3::new(-2.0, 0.0, -20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t5);
+
+    let mut t6 = Triangle::new(
+        Point3::new(-2.0, 0.9, -20.0),
+        Point3::new(-2.0, 0.0, -20.0),
+        Point3::new(-2.0, 0.9, 20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t6);
+
+
+    let mut t6 = Triangle::new(
+        Point3::new(-2.0, 1.9, 20.0),
+        Point3::new(-2.0, 5.0, 20.0),
+        Point3::new(-2.0, 1.9, -20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t6);
+
+    let mut t7 = Triangle::new(
+        Point3::new(-2.0, 5.0, -20.0),
+        Point3::new(-2.0, 1.9, -20.0),
+        Point3::new(-2.0, 5.0, 20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t7);
+
+    let mut t8 = Triangle::new(
+        Point3::new(-2.0, 0.9, 20.0),
+        Point3::new(-2.0, 1.9, 20.0),
+        Point3::new(-2.0, 0.9, -4.5),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t8);
+
+    let mut t9 = Triangle::new(
+        Point3::new(-2.0, 1.9, -4.5),
+        Point3::new(-2.0, 0.9, -4.5),
+        Point3::new(-2.0, 1.9, 20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t9);
+
+    let mut t10 = Triangle::new(
+        Point3::new(-2.0, 0.9, -6.5),
+        Point3::new(-2.0, 1.9, -6.5),
+        Point3::new(-2.0, 0.9, -20.0),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t10);
+
+    let mut t11 = Triangle::new(
+        Point3::new(-2.0, 1.9, -20.0),
+        Point3::new(-2.0, 0.9, -20.0),
+        Point3::new(-2.0, 1.9, -6.5),
+        Box::new(mat4),
+        Similarity3::identity());
+    w.add(t11);
 
     // let loaded = load_model("bun_zipper.ply");
     //
@@ -370,9 +417,6 @@ fn main() {
 
 
 
-    c.snapshot(&mut w, "check7rendreinlo.png");
     w.lights[0].intensity = Vector3::new(100.0, 100.0, 100.0);
-    c.snapshot(&mut w, "check7rendreinmid.png");
-    w.lights[0].intensity = Vector3::new(1000.0, 1000.0, 1000.0);
-    c.snapshot(&mut w, "check7rendreinhi.png");
+    c.snapshot(&mut w, "wardvolmidangle3.png", false);
 }
