@@ -57,6 +57,18 @@ There are quite a few hardcoded values and functionality, and I hope to make the
 ![](Renders/check7/check7rendreinhi.png)
 
 ## Advanced Checkpoint: K-D Tree
+Time to construct K-D tree: 0.5 seconds
+Time to render with K-D tree: 5 seconds
+Time to render without k-D tree: TOO LONG
 ![](Renders/advKDTree/kdtreebunny.png)
 
 ## Advanced Checkpoint: Advanced Tone Mapping
+### Low-range lighting
+![](Renders/check7/check7rendwardlo.png)
+![](Renders/advToneMapping/adaptivelo.png)
+### Mid-range lighting
+![](Renders/check7/check7rendwardmid.png)
+![](Renders/advToneMapping/adaptivemid.png)
+### High-range lighting
+![](Renders/check7/check7rendwardhi.png)
+![](Renders/advToneMapping/adaptivehi.png)
