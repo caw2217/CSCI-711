@@ -9,7 +9,7 @@ For my final project, I added volumetrics to my raytracer. The main reason I wan
 I was using Rust for my raytracer throughout the semester. I found packages that easily let me create images and perform calculations using vectors and matrices. The raytracer itself is split up into 5 files, one for the main raytracer functionality like the camera, one for lighting, one for implementing .ply models like the Stanford bunny, one for my primitives, and one for the scene/world.
 
 ### Systems
-For the volumetrics themselves, I added a seperate function to my world which allows the camera to use volumetric rays instead of regular rays. These rays have a global volume and calculate scattering through the medium.
+For the volumetrics themselves, I added a seperate function to my world which allows the camera to use volumetric rays instead of regular rays. These rays have a global volume and calculate scattering through the medium. This is done through Monte Carlo ray marching down the ray through the fog, calculating single-scatter at each step.
 
 ### Results
 ![](Renders/wardvolmid.png)
