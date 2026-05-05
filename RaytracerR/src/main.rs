@@ -207,7 +207,7 @@ impl Camera {
                 let dir = self.view * Vector3::new(x, y, z).normalize();
                 let r = Ray::new(self.position, UnitVector3::new_normalize(dir));
                 if (vol) {
-                    fp_buffer.put_pixel(j, i, world.spawn_vol_light_ray(r));
+                    fp_buffer.put_pixel(j, i, world.spawn_vol_light_ray(r, 0));
                 } else {
                     fp_buffer.put_pixel(j, i, world.spawn_light_ray(r));
                 }
@@ -255,12 +255,7 @@ impl Camera {
 //Objects/Camera must be transformed before adding to the world
 //The world will convert all its objects to camera space
 fn main() {
-    let cpos = Point3::new(-6.5, 1.6, -7.5);
-    let holepos = Point3::new(7.0, 1.6, -9.5);
-
-    let dir = UnitVector3::new_normalize(cpos - holepos);
-
-    let mut c: Camera = Camera::new(Point3::new(-6.5, 1.6, -4.5), dir, Vector3::y_axis(), 5.0, 45.0, 480, 640, 100.0);
+    let mut c: Camera = Camera::new(Point3::new(-6.5, 1.6, -5.5), -Vector3::x_axis(), Vector3::y_axis(), 5.0, 45.0, 480, 640, 100.0);
     //c.set_rotation(45.0f32.to_radians(), 0.0, 0.0);
     //c.set_pos(-3.5, 10.0, -10.0);
     let mut light1: Light = Light::new(Point3::new(0.0, 2.0, -5.5), Vector3::new(10.0, 10.0, 10.0));
@@ -418,5 +413,5 @@ fn main() {
 
 
     w.lights[0].intensity = Vector3::new(100.0, 100.0, 100.0);
-    c.snapshot(&mut w, "wardvolmidangle3.png", false);
+    c.snapshot(&mut w, "wardvolmultiangle2.png", true);
 }

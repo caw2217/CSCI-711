@@ -153,7 +153,7 @@ impl World {
     }
 
     //Spawn a ray and return irradiance
-    pub fn spawn_vol_light_ray(&self, ray: Ray) -> Rgb<f32> {
+    pub fn spawn_vol_light_ray(&self, ray: Ray, mult_n: u32) -> Rgb<f32> {
         let origin = ray.origin;
         let dir = ray.direction;
         let viewing = -ray.direction;
@@ -179,9 +179,7 @@ impl World {
         let mut t: f32 = random_range(0.0..step);
 
         let mut in_transmittance: Vector3<f32> = Vector3::new(1.0, 1.0, 1.0);
-        //for now, isotropic phase function
-        //let phase = 1.0 / (4.0 * PI);
-        let g = 0.6;
+        let g = 0.1;
         let mut in_scatter= Vector3::zeros();
         let mut emitted: Vector3<f32> = Vector3::zeros();
         let att = (-extinction_coeff * step).map(|x| x.exp());
@@ -233,7 +231,7 @@ impl World {
             ls += self.ambient_light * phase_env * 0.05;
 
             //multi scattering
-            let N = 0;
+            let N = mult_n;
             let mut lm: Vector3<f32> = Vector3::zeros();
             for i in 0..N {
                 let random_w = sample_sphere_uniform();
@@ -241,7 +239,7 @@ impl World {
                 let next_point = curr_point  + random_w.scale(random_r); //x prime
                 //same phase
                 let opt = extinction_coeff.scale(distance(&curr_point, &next_point));
-                let tr = Vector3::new(-opt.x.exp(), -opt.y.exp(), -opt.z.exp());
+                let tr = Vector3::new((-opt.x).exp(), (-opt.y).exp(), (-opt.z).exp());
                 //scatter
 
                 //ugh dupe code for now
@@ -262,26 +260,21 @@ impl World {
                     let light_power = &light.intensity;
                     let optical_depth_between_light: Vector3<f32> = extinction_coeff.scale(distance(&next_point, &light.position));
                     let trans_between_light: Vector3<f32> = Vector3::new(E.powf(-optical_depth_between_light.x), E.powf(-optical_depth_between_light.y), E.powf(-optical_depth_between_light.z));
-                    let dir_to_light = UnitVector3::new_normalize(light.position - curr_point);
+                    let dir_to_light = UnitVector3::new_normalize(light.position - next_point);
                     //not sure if i need visibility, phong is calculating shadows
                     let h: f32 = 1.0/(next_point - light.position).magnitude_squared();
-                    let shadow_ray = Ray::new(curr_point + dir_to_light.scale(0.01), dir_to_light);
+                    let shadow_ray = Ray::new(next_point + dir_to_light.scale(0.01), dir_to_light);
 
                     let mut v: f32 = 1.0;
 
-                    let cos_theta = dir_to_light.dot(&-dir);
+                    let cos_theta = dir_to_light.dot(&-random_w);
                     let denom = 1.0 + g * g - 2.0 * g * cos_theta;
                     mul_phase = (1.0 / (4.0 * PI)) * ((1.0 - g*g) / denom.powf(1.5));
 
-
                     if let Some(sh) = self.spawn_ray(shadow_ray) {
-                        if sh.omega < distance(&light.position, &curr_point) {
+                        if sh.omega < distance(&light.position, &next_point) {
                             v = 0.0;
-                        } else {
-                            v = 5.0;
                         }
-                    } else {
-                        v = 5.0;
                     }
 
                     li += (light_power * mul_phase * h * v).component_mul(&trans_between_light);
@@ -295,7 +288,7 @@ impl World {
 
             emitted += in_transmittance.component_mul(&absorption_coeff).component_mul(&Vector3::zeros()) * step;
 
-            in_scatter += in_transmittance.component_mul(&scatter_coeff).component_mul(&(ls + lm)) * step * 5.0;
+            in_scatter += in_transmittance.component_mul(&scatter_coeff).component_mul(&(ls + lm)) * step * 10.0;
 
             t += step;
         }
