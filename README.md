@@ -1,7 +1,4 @@
-
-  
-## Overview
-This is a repository that holds all the code and renders from my rust raytracer. This raytracer supports k-d trees for navigating complex scenes efficiently, volumetrics, and tone-mapping.
+This is a repository that holds all the code and renders from my rust raytracer. This raytracer supports k-d trees for navigating complex scenes efficiently, volumetrics, and tone-mapping.  
 
 # Final Project Report
 ## Intro
