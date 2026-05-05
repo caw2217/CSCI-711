@@ -12,6 +12,9 @@ I was using Rust for my raytracer throughout the semester. I found packages that
 For the volumetrics themselves, I added a seperate function to my world which allows the camera to use volumetric rays instead of regular rays. These rays have a global volume and calculate scattering through the medium.
 
 ### Results
+![](Renders/wardvolmid.png)
+![](Renders/wardvolmidangle2.png)
+![](Renders/wardvolmidangle3.png)
 
 ### Future work
 There are quite a few hardcoded values and functionality, and I hope to make the raytracer more modular and multi-functional. I also want to be able to potentially make this use the GPU and be real-time at some point.
